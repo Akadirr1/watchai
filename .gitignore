@@ -1,0 +1,55 @@
+# ---------------------------------------------------------------
+# Secrets — QuotaPets stores credentials in the iOS Keychain only.
+# Nothing credential-shaped may ever be committed (see docs §Security).
+# ---------------------------------------------------------------
+*.credentials.json
+auth.json
+secrets.json
+Secrets.swift
+*.p12
+*.mobileprovision
+*.certSigningRequest
+.env
+.env.*
+
+# ---------------------------------------------------------------
+# Xcode
+# ---------------------------------------------------------------
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Xcode project cruft that should not be shared
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcworkspace/contents.xcworkspacedata#
+
+# ---------------------------------------------------------------
+# Swift Package Manager
+# ---------------------------------------------------------------
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+
+# ---------------------------------------------------------------
+# macOS
+# ---------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ---------------------------------------------------------------
+# Editors / tooling
+# ---------------------------------------------------------------
+.idea/
+*.swp
