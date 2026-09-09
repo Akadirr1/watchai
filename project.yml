@@ -1,0 +1,172 @@
+# XcodeGen project definition for QuotaPets.
+#
+# The Xcode project is GENERATED, never committed. A .pbxproj is unreviewable and
+# merge-hostile; this file is the source of truth. On a Mac:
+#
+#     brew install xcodegen && xcodegen generate && open QuotaPets.xcodeproj
+#
+# RENAMING THE PROJECT (the brief calls "QuotaPets" temporary): change `name` below and
+# the `PRODUCT_NAME`/bundle-id prefix in `options`. Target names are referenced in a
+# handful of places in this file and nowhere in Swift source, so a rename is confined
+# here plus the directory names under Apps/.
+#
+# Deployment targets are pinned to iOS 18 / watchOS 11 per the brief (§36). Verified
+# against Apple's Xcode support matrix: Xcode 26.6 still permits iOS 15-26.5 and
+# watchOS 8-26.5 deployment targets, so these build fine on a current toolchain.
+# watchOS 11 supports Apple Watch Series 6 and later, so a Series 7 is in range.
+
+name: QuotaPets
+
+options:
+  bundleIdPrefix: com.quotapets
+  deploymentTarget:
+    iOS: "18.0"
+    watchOS: "11.0"
+    macOS: "14.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  # The watch app is a modern single-target watchOS app embedded in the iOS app.
+  # No WKWatchKitApp, no WatchKit 1.0 extension: mixing legacy watch metadata with a
+  # modern SwiftUI watchOS target is a known cause of install failures (§35).
+  xcodeVersion: "16.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    # Set this to your own team on first build, or select it in Xcode's Signing pane.
+    # Left empty so the repo carries no account-specific state.
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+
+packages:
+  QuotaPetsShared:
+    path: QuotaPetsShared
+
+targets:
+
+  # ---------------------------------------------------------------------------
+  # iPhone — authentication-free under the helper-relay design. It pairs with the
+  # macOS helper, caches snapshots, runs background refresh, and feeds the watch.
+  # ---------------------------------------------------------------------------
+  QuotaPetsPhone:
+    type: application
+    platform: iOS
+    sources:
+      - path: Apps/QuotaPetsPhone
+    dependencies:
+      - package: QuotaPetsShared
+      - target: QuotaPetsWatch
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.quotapets.phone
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: Apps/QuotaPetsPhone/Info.plist
+      properties:
+        CFBundleDisplayName: QuotaPets
+        # BGAppRefreshTask requires BOTH the fetch background mode and the identifier
+        # allow-list; register() returns false without the latter.
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.quotapets.phone.refresh
+        # The helper is reached over the LAN. Unlike a loopback listener, this DOES
+        # require a usage description and a declared Bonjour service (research §6).
+        NSLocalNetworkUsageDescription: >-
+          QuotaPets finds your Mac on this network to read your Claude and Codex usage.
+          No account credentials are sent to or stored on this device.
+        NSBonjourServices:
+          - _quotapets._tcp
+
+  # ---------------------------------------------------------------------------
+  # Apple Watch — the actual product surface.
+  # ---------------------------------------------------------------------------
+  QuotaPetsWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: Apps/QuotaPetsWatch
+    dependencies:
+      - package: QuotaPetsShared
+      - target: QuotaPetsWidgets
+        embed: true
+    settings:
+      base:
+        # Modern watchOS requires the watch app bundle id to be the iOS one
+        # suffixed with .watchkitapp.
+        PRODUCT_BUNDLE_IDENTIFIER: com.quotapets.phone.watchkitapp
+    info:
+      path: Apps/QuotaPetsWatch/Info.plist
+      properties:
+        CFBundleDisplayName: QuotaPets
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: com.quotapets.phone
+        # Always-On is on by default for watchOS 8+ builds and is wanted here: the
+        # mascot and countdown are designed to stay legible while dimmed (§19).
+        WKSupportsAlwaysOnDisplay: true
+
+  # ---------------------------------------------------------------------------
+  # Complications. Note this is a ONE-WAY DOOR: as soon as a WidgetKit complication
+  # ships, the system permanently stops calling ClockKit timeline APIs. There is no
+  # mixed mode and no fallback (verified, research §5).
+  # ---------------------------------------------------------------------------
+  QuotaPetsWidgets:
+    type: app-extension
+    platform: watchOS
+    sources:
+      - path: Apps/QuotaPetsWidgets
+    dependencies:
+      - package: QuotaPetsShared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.quotapets.phone.watchkitapp.widgets
+    info:
+      path: Apps/QuotaPetsWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: QuotaPets
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+
+  # ---------------------------------------------------------------------------
+  # macOS helper — the ONLY component that ever holds a provider credential.
+  #
+  # It reads what the user's own `claude` and `codex` CLIs already wrote, fetches
+  # usage with the shared adapters, and serves normalised snapshots to the phone.
+  # See docs/provider-research.md §4.3 for why this exists rather than a native
+  # iOS login flow.
+  # ---------------------------------------------------------------------------
+  QuotaPetsHelper:
+    type: application
+    platform: macOS
+    sources:
+      - path: Apps/QuotaPetsHelper
+    dependencies:
+      - package: QuotaPetsShared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.quotapets.helper
+    info:
+      path: Apps/QuotaPetsHelper/Info.plist
+      properties:
+        CFBundleDisplayName: QuotaPets Helper
+        # Menu-bar only; no Dock icon, no window on launch.
+        LSUIElement: true
+
+schemes:
+  QuotaPets:
+    build:
+      targets:
+        QuotaPetsPhone: all
+        QuotaPetsWatch: all
+        QuotaPetsWidgets: all
+    run:
+      config: Debug
+  QuotaPetsHelper:
+    build:
+      targets:
+        QuotaPetsHelper: all
+    run:
+      config: Debug
