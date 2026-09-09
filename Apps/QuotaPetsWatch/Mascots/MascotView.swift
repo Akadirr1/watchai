@@ -64,7 +64,10 @@ public struct MascotView: View {
             ?? MascotImageLoader.image(named: MascotAsset.fallbackName(for: provider)) {
             Image(uiImage: ui).resizable().scaledToFit()
         } else {
-            MascotPlaceholder(provider: provider, state: state)
+            // No asset supplied: draw the pet. This is the normal path, not a
+            // degraded one — the drawn character animates per energy state, which a
+            // static image cannot.
+            PetShapeView(provider: provider, state: state, isAnimating: isAnimating)
         }
     }
 
@@ -84,27 +87,4 @@ public struct MascotView: View {
 
 enum MascotImageLoader {
     static func image(named name: String) -> UIImage? { UIImage(named: name) }
-}
-
-/// Obvious stand-in so a missing asset reads as "art not supplied yet", never as a
-/// finished design (§14).
-struct MascotPlaceholder: View {
-    let provider: AIProvider
-    let state: MascotEnergyState
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
-                .foregroundStyle(.secondary)
-            VStack(spacing: 2) {
-                Text(provider.displayName.prefix(1))
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                Text("no art")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(width: 64, height: 64)
-    }
 }

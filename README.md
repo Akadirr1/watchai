@@ -6,9 +6,9 @@ energy as you run out of quota.
 Native iPhone + Apple Watch. SwiftUI, WidgetKit complications, WatchConnectivity.
 No web view, no React Native, no cloud backend.
 
-> **Status: partially built.** Phases 0, 1, 2, 3 and the provider core of 5/6 are done and
-> the shared logic is tested. The Apple targets have **never been compiled** — see
-> [Build status](#build-status). Read that section before trusting anything visual.
+> **Status: partially built.** Phases 0-3 and the provider core of 5/6 are done, mascots are
+> drawn and animated, and the shared logic is tested. The Apple targets have **never been
+> compiled** — see [Build status](#build-status) before trusting anything visual.
 
 ---
 
@@ -137,13 +137,28 @@ surface showing a number also shows its freshness (`UPDATED 42s AGO` / `STALE ·
 
 ---
 
-## Mascot art — you must supply this
+## Mascots
 
-**The app ships with no mascot artwork.** No copyrighted images were scraped. A dashed
-placeholder reading "no art" renders until you add files — deliberately obvious rather
-than a generic emoji quietly standing in.
+The mascots are **drawn in code**, not shipped as images. Two original characters —
+Claude soft and round with a spark tuft, Codex angular with a blinking cursor eye.
 
-Drop these into the watch target's asset catalog; no code change needed:
+This is not a placeholder. Drawing them means they can actually *animate per energy
+state* rather than swapping static frames: they breathe (squash on Y only, so the
+silhouette keeps its footprint), blink at irregular intervals, sink and tilt as quota
+drains, and finally sleep with a drifting `z z`. A tired pet blinks more slowly because a
+blink and a droop are the same mechanism — no extra artwork needed.
+
+Live preview, no Xcode required:
+**[Mascot Lab](https://claude.ai/code/artifact/adddbd0a-104f-41c2-bf1f-4838e92ec152)** —
+drag the quota sliders and watch both pets react.
+
+Geometry lives in `Apps/QuotaPetsWatch/Mascots/PetShapes.swift`. `PetPose` is a per-state
+value table, so tuning a mood is editing numbers, not redrawing.
+
+### Supplying your own art (optional)
+
+If you'd rather use your own images, drop them into the watch target's asset catalog and
+they take precedence automatically — no code change:
 
 ```
 claudeMascot-hyper   claudeMascot-happy   claudeMascot-normal
@@ -151,7 +166,8 @@ claudeMascot-tired   claudeMascot-exhausted   claudeMascot-empty
 codexMascot-<the same six>
 ```
 
-`claudeMascot` / `codexMascot` act as fallbacks, so a partial set still works.
+`claudeMascot` / `codexMascot` act as fallbacks. Note that supplied images are static —
+the drawn pets are the animated path.
 
 ### Energy states
 
