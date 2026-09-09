@@ -139,21 +139,29 @@ surface showing a number also shows its freshness (`UPDATED 42s AGO` / `STALE ·
 
 ## Mascots
 
-The mascots are **drawn in code**, not shipped as images. Two original characters —
-Claude soft and round with a spark tuft, Codex angular with a blinking cursor eye.
+The mascots are **drawn in code**, not shipped as images. Each pet is built from the
+*form* its provider is recognisable by, redrawn as an original character rather than
+copying a brand asset:
 
-This is not a placeholder. Drawing them means they can actually *animate per energy
-state* rather than swapping static frames: they breathe (squash on Y only, so the
-silhouette keeps its footprint), blink at irregular intervals, sink and tilt as quota
-drains, and finally sleep with a drifting `z z`. A tired pet blinks more slowly because a
-blink and a droop are the same mechanism — no extra artwork needed.
+- **Claude** → a radiating spark. Its arms are the gauge.
+- **Codex** → a terminal window. Its cursor is the pulse.
+
+The point of that choice: in both cases the form **is** the expression mechanism, so
+nothing has to be bolted on to show mood. As quota drains, Claude's crown wilts — the top
+arms collapse the way a spent flower does, while the arms already pointing down keep
+holding it up. Codex's cursor blink slows from 0.45s to 3s and its phosphor glow fades
+until the screen goes dark.
+
+No third-party artwork is copied or redistributed. Anthropic's and OpenAI's marks are
+trademarks; neither ships a mascot character, and Apache-2.0 (which covers `openai/codex`)
+explicitly grants no trademark rights.
 
 Live preview, no Xcode required:
 **[Mascot Lab](https://claude.ai/code/artifact/adddbd0a-104f-41c2-bf1f-4838e92ec152)** —
 drag the quota sliders and watch both pets react.
 
-Geometry lives in `Apps/QuotaPetsWatch/Mascots/PetShapes.swift`. `PetPose` is a per-state
-value table, so tuning a mood is editing numbers, not redrawing.
+`PetPose` in `Apps/QuotaPetsWatch/Mascots/PetShapes.swift` is a per-state value table, so
+tuning a mood means editing numbers, not redrawing.
 
 ### Supplying your own art (optional)
 
