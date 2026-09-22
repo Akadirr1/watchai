@@ -399,6 +399,55 @@ browser or needs a PTY, so no `script`/`node-pty` machinery is required.
 are what first-party clients use, but carry no stability guarantee. Documented fallback: a
 one-off `docker exec <container> claude auth login` into the same config dir.
 
+### 6.1 Two invocation rules, found only by running the real binaries
+
+Phase 0 read both protocols from source and got the *messages* right. It did not catch how
+either process has to be started. Both of these were found in production, and both failed
+in the same misleading way — the login produced no URL, while the poll loop kept printing
+`notAuthenticated`, which reads as "you have not signed in yet".
+
+**Claude requires `--verbose`.** Verified against `claude` 2.1.280:
+
+```
+$ claude -p --input-format stream-json --output-format stream-json
+Error: When using --print, --output-format=stream-json requires --verbose
+$ echo $?
+1
+```
+
+The flag does not make the child noisier for us — its output is JSON either way.
+
+**The Codex app-server requires an LSP-shaped handshake.** Verified against `codex-cli`
+0.155.1. Sending the login request first:
+
+```
+→ {"jsonrpc":"2.0","id":1,"method":"account/login/start","params":{"type":"chatgptDeviceCode"}}
+← {"error":{"code":-32600,"message":"Not initialized"},"id":1}
+```
+
+With `initialize` + the `initialized` notification in front of it:
+
+```
+→ {"jsonrpc":"2.0","id":0,"method":"initialize","params":{"clientInfo":{…}}}
+← {"id":0,"result":{"userAgent":"…","codexHome":"…","platformOs":"linux"}}
+→ {"jsonrpc":"2.0","method":"initialized","params":{}}
+→ {"jsonrpc":"2.0","id":1,"method":"account/login/start","params":{"type":"chatgptDeviceCode"}}
+← {"id":1,"result":{"type":"chatgptDeviceCode","loginId":"…",
+     "verificationUrl":"https://auth.openai.com/codex/device","userCode":"XXXX-XXXXX"}}
+```
+
+The three messages can be written back to back without awaiting the response: stdin is
+processed in order.
+
+`account/login/completed` — the notification §4.2 documents as the completion signal — is
+present in the shipped `codex` binary. That one has **not** been exercised end to end here,
+because doing so would mean completing a real device-code login.
+
+Both rules are pinned by `test/login.test.ts`, which records what the manager actually
+writes to a stand-in CLI. These are undocumented, unversioned interfaces; a test that
+fixes the invocation is what turns the next change into a red build rather than another
+silent one.
+
 **Token refresh is performed by QuotaPets, not the CLI.** This is a correction to an
 earlier assumption: both CLIs refresh *lazily*, only when a command runs, and after login
 nothing invokes them again — so left alone, the token would simply expire. Refreshing is

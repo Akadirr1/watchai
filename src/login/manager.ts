@@ -8,6 +8,24 @@ import { missingCLIHint, resolveCLI } from "./availability.js";
 /** Opt-in, because the vendor CLI's output can contain the verification URL and code. */
 const DEBUG_LOGIN = process.env["DEBUG_LOGIN"] === "1";
 
+/**
+ * `--verbose` is not optional: the CLI refuses to start without it here, with
+ * `When using --print, --output-format=stream-json requires --verbose` and exit 1. It
+ * does not make the child noisier for us — its output is JSON either way, and we never
+ * log the child's own words.
+ */
+const CLAUDE_ARGS = [
+  "-p",
+  "--verbose",
+  "--input-format",
+  "stream-json",
+  "--output-format",
+  "stream-json",
+] as const;
+
+/** Only shapes the user-agent string the app-server builds for itself. */
+const CODEX_CLIENT_INFO = { name: "quotapets", title: "QuotaPets", version: "1.0.0" } as const;
+
 const URL_KEYS = ["manualUrl", "manual_url", "verificationUrl", "verification_url"] as const;
 const CODE_KEYS = ["userCode", "user_code"] as const;
 
@@ -89,7 +107,7 @@ export class LoginManager {
     // for is the one that runs.
     const child =
       provider === "claude"
-        ? spawn(command, ["-p", "--input-format", "stream-json", "--output-format", "stream-json"], {
+        ? spawn(command, CLAUDE_ARGS, {
             env: { ...process.env, CLAUDE_CONFIG_DIR: this.dirs.claude },
             stdio: ["pipe", "pipe", "pipe"],
           })
@@ -133,6 +151,17 @@ export class LoginManager {
         request: { subtype: "claude_authenticate", loginWithClaudeAi: true },
       });
     } else {
+      // The app-server is LSP-shaped: every other method answers
+      // `{"code":-32600,"message":"Not initialized"}` until this handshake lands. Sent
+      // back to back rather than awaited — stdin is processed in order, so the server
+      // has handled `initialize` before it reads the login request.
+      channel.send({
+        jsonrpc: "2.0",
+        id: 0,
+        method: "initialize",
+        params: { clientInfo: CODEX_CLIENT_INFO },
+      });
+      channel.send({ jsonrpc: "2.0", method: "initialized", params: {} });
       channel.send({
         jsonrpc: "2.0",
         id: 1,
