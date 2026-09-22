@@ -1,0 +1,10 @@
+.git
+node_modules
+dist
+test
+Apps
+QuotaPetsShared
+docs
+*.md
+project.yml
+vitest.config.ts
