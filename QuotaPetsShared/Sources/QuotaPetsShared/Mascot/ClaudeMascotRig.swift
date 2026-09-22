@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(CoreGraphics)
+// Apple's Foundation leaves CGPoint/CGRect's Swift API (init(x:y:width:height:), minX,
+// .zero, Equatable) to CoreGraphics; Linux's Foundation has it built in.
+import CoreGraphics
+#endif
 
 // The Claude mascot, ported from github.com/Akadirr1/mascot (claude-mascot.js @ a323dcc).
 //

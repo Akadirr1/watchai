@@ -1,5 +1,8 @@
 import Testing
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics   // CGPoint arithmetic in the mascot tests, as in ClaudeMascotRig
+#endif
 @testable import QuotaPetsShared
 
 private let now = Date(timeIntervalSince1970: 1_757_000_000)

@@ -20,14 +20,16 @@ struct ClaudeMascotView: View {
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !moving)) { timeline in
+            // Worked out here, so the renderer below captures a plain value, not view state.
+            let shapes = ClaudeMascotRig.shapes(rotation, at: moving ? timeline.date.timeIntervalSince(start) : 0,
+                                                bandana: bandana)
             Canvas { context, size in
                 let box = ClaudeMascotRig.viewBox
                 let scale = min(size.width / box.width, size.height / box.height)
                 context.translateBy(x: (size.width - box.width * scale) / 2 - box.minX * scale,
                                     y: (size.height - box.height * scale) / 2 - box.minY * scale)
                 context.scaleBy(x: scale, y: scale)
-                let time = moving ? timeline.date.timeIntervalSince(start) : 0
-                for shape in ClaudeMascotRig.shapes(rotation, at: time, bandana: bandana) {
+                for shape in shapes {
                     var path = Path()
                     path.addLines(shape.points)
                     path.closeSubpath()
