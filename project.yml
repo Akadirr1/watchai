@@ -71,10 +71,10 @@ targets:
         # Always-On is wanted: the mascot and countdown are designed to stay legible
         # while dimmed.
         WKSupportsAlwaysOnDisplay: true
-        # Supplied by Secrets.xcconfig, which is gitignored. Nothing credential-shaped
-        # is ever committed.
+        # The only build-time setting, supplied by Secrets.xcconfig (gitignored).
+        # There is deliberately no token here: the watch earns a device token by QR
+        # pairing and keeps it in the Keychain, so the bundle carries no credential.
         QUOTAPETS_API_URL: $(QUOTAPETS_API_URL)
-        QUOTAPETS_API_TOKEN: $(QUOTAPETS_API_TOKEN)
 
   # ---------------------------------------------------------------------------
   # Complications. ONE-WAY DOOR: once a WidgetKit complication ships, the system

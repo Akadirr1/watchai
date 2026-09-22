@@ -82,6 +82,7 @@ export class PairingStore {
   private readonly sessions = new Map<string, PairingSession>();
   private devices: Device[] = [];
   private readonly path: string;
+  private persistQueue: Promise<void> = Promise.resolve();
 
   constructor(dataDir: string) {
     this.path = join(dataDir, "devices.json");
@@ -96,7 +97,18 @@ export class PairingStore {
     }
   }
 
-  private async persist(): Promise<void> {
+  /**
+   * Serialised. Two claims landing in the same tick would otherwise both write
+   * `devices.json.tmp` and both rename it: the second rename fails with ENOENT, and the
+   * one that lands last can be carrying the older device list. Chaining makes the last
+   * write the one with the most state, which is the only ordering that is correct here.
+   */
+  private persist(): Promise<void> {
+    this.persistQueue = this.persistQueue.then(() => this.writeDevices());
+    return this.persistQueue;
+  }
+
+  private async writeDevices(): Promise<void> {
     try {
       await mkdir(dirname(this.path), { recursive: true });
       const tmp = `${this.path}.tmp`;

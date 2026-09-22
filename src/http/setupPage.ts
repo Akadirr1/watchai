@@ -32,11 +32,28 @@ export const SETUP_PAGE = `<!doctype html>
   input { width:100%; font:13px ui-monospace,monospace; padding:9px 10px; border-radius:8px;
           border:1px solid var(--edge); background:var(--bg); color:var(--fg) }
   .err { color:#c4692f; font-size:13px; margin-top:8px }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:10px;
+         padding:8px 0; border-bottom:1px solid var(--edge) }
+  .row:last-child { border-bottom:0 }
+  .row span { font:12px ui-monospace,monospace; color:var(--muted) }
 </style></head><body><main>
 <h1>QuotaPets</h1>
 <p class="sub">Connect your accounts. Sign-in runs the real Claude and Codex CLIs inside this
 container &mdash; QuotaPets never sees your password and never runs prompts.</p>
 <div id="providers"></div>
+
+<section>
+  <h2>Paired watches</h2>
+  <div class="state">Open the app on your watch, point your iPhone camera at the QR it shows,
+  and tap the notification &mdash; you are already signed in here, so that finishes the pairing.
+  If the camera will not read it, type the eight characters shown under the QR instead.</div>
+  <div id="device-list" class="state">loading&hellip;</div>
+  <p><input id="pair-code" placeholder="WATCH CODE" maxlength="8" autocapitalize="characters"
+     autocorrect="off" autocomplete="off" spellcheck="false"></p>
+  <p><button class="secondary" id="pair-go">Pair this code</button></p>
+  <div class="err" id="pair-err"></div>
+</section>
+
 <script>
 const PROVIDERS = [["claude","Claude"],["codex","Codex"]];
 const root = document.getElementById("providers");
@@ -108,7 +125,60 @@ async function refreshStates() {
   } catch {}
 }
 
+// --- Paired watches ---------------------------------------------------------
+// Revoking here is what makes a lost watch a small problem: each watch holds its own
+// device token, so removing one never means rotating AUTH_TOKEN.
+
+const deviceList = document.getElementById("device-list");
+
+function ago(ms) {
+  if (ms === null || ms === undefined) return "never";
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return s + "s ago";
+  if (s < 3600) return Math.round(s / 60) + "m ago";
+  if (s < 86400) return Math.round(s / 3600) + "h ago";
+  return Math.round(s / 86400) + "d ago";
+}
+
+async function refreshDevices() {
+  let d;
+  try { d = await api("/api/devices"); } catch { return; }
+  if (!d.devices.length) { deviceList.textContent = "No watch paired yet."; return; }
+  deviceList.textContent = "";
+  for (const dev of d.devices) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const label = document.createElement("span");
+    // textContent, not innerHTML: these values come off disk and are never markup.
+    label.textContent = dev.id.slice(0, 8) + " \u00b7 paired " + ago(dev.createdAt) +
+                        " \u00b7 seen " + ago(dev.lastSeenAt);
+    const btn = document.createElement("button");
+    btn.className = "secondary";
+    btn.textContent = "Revoke";
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try { await api("/api/devices/" + encodeURIComponent(dev.id), { method: "DELETE" }); }
+      catch {}
+      refreshDevices();
+    };
+    row.append(label, btn);
+    deviceList.appendChild(row);
+  }
+}
+
+document.getElementById("pair-go").onclick = () => {
+  const err = document.getElementById("pair-err");
+  const c = document.getElementById("pair-code").value.trim().toUpperCase();
+  // Same alphabet the server mints from — no 0/O or 1/I/l, which is the point of
+  // offering a typed fallback at all.
+  if (!/^[A-Z2-9]{8}$/.test(c)) { err.textContent = "That is not an eight-character watch code."; return; }
+  err.textContent = "";
+  location.href = "/pair?c=" + encodeURIComponent(c);
+};
+
 for (const [p, label] of PROVIDERS) render(p, label);
 refreshStates();
+refreshDevices();
 setInterval(refreshStates, 15000);
+setInterval(refreshDevices, 15000);
 </script></main></body></html>`;
