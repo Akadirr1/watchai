@@ -1,3 +1,5 @@
+import { BASE_STYLE } from "./pageStyle.js";
+
 /**
  * The only HTML this server serves, and only for first-time setup.
  *
@@ -8,38 +10,28 @@ export const SETUP_PAGE = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>QuotaPets setup</title>
-<style>
-  :root { color-scheme: light dark; --fg:#14171c; --muted:#667085; --edge:#dde1e7; --bg:#f4f5f7; --card:#fff; }
-  @media (prefers-color-scheme: dark) { :root { --fg:#e9ebee; --muted:#8b94a3; --edge:#262a31; --bg:#0d0f12; --card:#16191e; } }
-  * { box-sizing:border-box }
-  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 ui-sans-serif,system-ui,sans-serif; }
-  main { max-width:560px; margin:0 auto; padding:32px 20px 64px }
-  h1 { font-size:24px; margin:0 0 4px }
-  p.sub { color:var(--muted); margin:0 0 24px }
-  section { background:var(--card); border:1px solid var(--edge); border-radius:12px; padding:18px; margin-bottom:16px }
-  h2 { font-size:16px; margin:0 0 4px }
+<style>${BASE_STYLE}
   .state { font:12px ui-monospace,monospace; color:var(--muted); margin-bottom:12px }
-  button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--edge);
-           background:var(--fg); color:var(--bg); cursor:pointer }
-  button.secondary { background:transparent; color:var(--fg) }
-  button:disabled { opacity:.5; cursor:default }
-  a { color:inherit }
   .step { margin-top:14px; padding-top:14px; border-top:1px solid var(--edge); display:none }
   .step.on { display:block }
   code.url { display:block; word-break:break-all; font:12px ui-monospace,monospace;
              background:var(--bg); border:1px solid var(--edge); border-radius:8px; padding:10px; margin:8px 0 }
   .code { font:600 22px ui-monospace,monospace; letter-spacing:.12em; margin:8px 0 }
-  input { width:100%; font:13px ui-monospace,monospace; padding:9px 10px; border-radius:8px;
-          border:1px solid var(--edge); background:var(--bg); color:var(--fg) }
-  .err { color:#c4692f; font-size:13px; margin-top:8px }
   .row { display:flex; align-items:center; justify-content:space-between; gap:10px;
          padding:8px 0; border-bottom:1px solid var(--edge) }
   .row:last-child { border-bottom:0 }
   .row span { font:12px ui-monospace,monospace; color:var(--muted) }
+  .banner { display:none; background:#fdf1e3; border:1px solid #e3c49f; color:#7a4a10;
+            border-radius:10px; padding:12px 14px; margin-bottom:16px; font-size:13px }
+  @media (prefers-color-scheme: dark) {
+    .banner { background:#2a1d10; border-color:#5a3d1c; color:#e5bb8a }
+  }
+  .banner.on { display:block }
 </style></head><body><main>
 <h1>QuotaPets</h1>
 <p class="sub">Connect your accounts. Sign-in runs the real Claude and Codex CLIs inside this
 container &mdash; QuotaPets never sees your password and never runs prompts.</p>
+<div class="banner" id="tools-banner"></div>
 <div id="providers"></div>
 
 <section>
@@ -117,10 +109,33 @@ async function poll(p) {
 async function refreshStates() {
   try {
     const h = await api("/api/heartbeat");
-    for (const [p] of PROVIDERS) {
+    // "Not authenticated" and "the binary is not here" look identical from the poll
+    // loop's point of view, so the server reports tool availability separately and the
+    // page says which one it is. Connecting is pointless without the CLI.
+    const missing = [];
+    for (const [p, label] of PROVIDERS) {
       const st = h.providers[p];
       const el = document.getElementById("s-"+p);
-      if (el && st) el.textContent = st.state + (st.lastError ? " — " + st.lastError.hint : "");
+      const installed = !h.tools || !h.tools[p] || h.tools[p].available !== false;
+      if (!installed) missing.push(label);
+      const btn = document.getElementById("b-"+p);
+      if (btn) btn.disabled = !installed;
+      if (el && st) {
+        el.textContent = installed
+          ? st.state + (st.lastError ? " — " + st.lastError.hint : "")
+          : "CLI not installed";
+      }
+    }
+    const banner = document.getElementById("tools-banner");
+    if (missing.length) {
+      banner.textContent = "The " + missing.join(" and ") +
+        (missing.length > 1 ? " CLIs are" : " CLI is") +
+        " not installed in this container, so sign-in cannot run. QuotaPets installs both" +
+        " in its Dockerfile — check that this deployment uses the Dockerfile build pack" +
+        " rather than the platform's default (Coolify falls back to Nixpacks).";
+      banner.classList.add("on");
+    } else {
+      banner.classList.remove("on");
     }
   } catch {}
 }

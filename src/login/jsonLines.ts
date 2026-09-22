@@ -14,6 +14,11 @@ export class JsonLineChannel {
   constructor(private readonly child: ChildProcessWithoutNullStreams) {
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => this.ingest(chunk));
+    // A stream 'error' with no listener is thrown, same as on the process itself. Writing
+    // to a child that never started, or has already exited, raises EPIPE here — and that
+    // must not be able to take the server down.
+    child.stdin.on("error", () => {});
+    child.stdout.on("error", () => {});
   }
 
   private ingest(chunk: string): void {
@@ -39,8 +44,11 @@ export class JsonLineChannel {
     this.handlers.push(handler);
   }
 
+  /** A no-op once the child is gone: there is nobody left to read it. */
   send(message: unknown): void {
-    this.child.stdin.write(`${JSON.stringify(message)}\n`);
+    const { stdin } = this.child;
+    if (!stdin.writable || stdin.destroyed) return;
+    stdin.write(`${JSON.stringify(message)}\n`);
   }
 }
 
