@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { PROVIDERS, type AIProvider } from "../models/provider.js";
 import { JsonLineChannel, findString } from "./jsonLines.js";
 import { idleSession, LOGIN_TIMEOUT_MS, type LoginSession } from "./session.js";
+import { missingCLIHint, resolveCLI } from "./availability.js";
 
 /** Opt-in, because the vendor CLI's output can contain the verification URL and code. */
 const DEBUG_LOGIN = process.env["DEBUG_LOGIN"] === "1";
@@ -36,7 +37,15 @@ export class LoginManager {
   private readonly sessions = new Map<AIProvider, LoginSession>();
   private readonly active = new Map<AIProvider, ActiveLogin>();
 
-  constructor(private readonly dirs: { claude: string; codex: string }) {
+  /**
+   * `resolve` is injectable so the spawn-failure path can be exercised by a test: point it
+   * at an absolute path that is not there and the child fails exactly the way a missing
+   * CLI does in production.
+   */
+  constructor(
+    private readonly dirs: { claude: string; codex: string },
+    private readonly resolve: (provider: AIProvider) => string | null = resolveCLI,
+  ) {
     for (const provider of PROVIDERS) this.sessions.set(provider, idleSession(provider));
   }
 
@@ -48,8 +57,21 @@ export class LoginManager {
     return this.active.has(provider);
   }
 
+  /** Whether the vendor binary this provider needs is actually installed. */
+  cliAvailable(provider: AIProvider): boolean {
+    return this.resolve(provider) !== null;
+  }
+
   async start(provider: AIProvider): Promise<LoginSession> {
     this.cancel(provider);
+
+    // Resolved before spawning, so the failure reads as a diagnosis rather than an ENOENT.
+    // The route answers 503 on this too; having it here as well keeps `start()` safe to
+    // call directly.
+    const command = this.resolve(provider);
+    if (command === null) {
+      return this.mark(provider, "failed", missingCLIHint(provider));
+    }
 
     // Both CLIs error out if their config directory does not already exist — neither
     // creates it recursively, and the resulting failure is silent.
@@ -63,13 +85,15 @@ export class LoginManager {
     };
     this.sessions.set(provider, session);
 
+    // The resolved absolute path, not the bare name: the same file that was just checked
+    // for is the one that runs.
     const child =
       provider === "claude"
-        ? spawn("claude", ["-p", "--input-format", "stream-json", "--output-format", "stream-json"], {
+        ? spawn(command, ["-p", "--input-format", "stream-json", "--output-format", "stream-json"], {
             env: { ...process.env, CLAUDE_CONFIG_DIR: this.dirs.claude },
             stdio: ["pipe", "pipe", "pipe"],
           })
-        : spawn("codex", ["app-server", "--listen", "stdio://"], {
+        : spawn(command, ["app-server", "--listen", "stdio://"], {
             env: { ...process.env, CODEX_HOME: this.dirs.codex },
             stdio: ["pipe", "pipe", "pipe"],
           });
@@ -88,6 +112,11 @@ export class LoginManager {
       const text = chunk.trim();
       if (text) console.log(`[${provider} login:debug] ${text.slice(0, 200)}`);
     });
+    // Load-bearing. A ChildProcess that fails to spawn emits 'error', and an 'error'
+    // event with no listener is thrown — which took the whole server down, repeatedly,
+    // the first time this ran somewhere the CLI was not installed. A missing binary must
+    // fail one login, not the API.
+    child.on("error", (error) => this.onSpawnError(provider, error));
     child.on("exit", (code) => this.onExit(provider, code));
 
     channel.onMessage((message) => this.onMessage(provider, message));
@@ -173,6 +202,17 @@ export class LoginManager {
       if (account) this.finish(provider, true, null);
       else if (error && message["request_id"] === "qp-callback") this.finish(provider, false, error);
     }
+  }
+
+  private onSpawnError(provider: AIProvider, error: Error): void {
+    const code = (error as NodeJS.ErrnoException).code;
+    console.error(`[${provider} login] could not start the CLI (${code ?? "unknown"})`);
+    this.cancel(provider);
+    this.mark(
+      provider,
+      "failed",
+      code === "ENOENT" ? missingCLIHint(provider) : `could not start the CLI (${code ?? "unknown error"})`,
+    );
   }
 
   private onExit(provider: AIProvider, code: number | null): void {
