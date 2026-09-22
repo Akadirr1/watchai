@@ -248,7 +248,7 @@ Personal Team.
 ## Testing
 
 ```bash
-npm test                              # server: 133 tests
+npm test                              # server: 137 tests
 cd QuotaPetsShared && swift test      # watch core: 26 tests, runs on Linux too
 ```
 
@@ -267,6 +267,7 @@ on the first build.
 | `[claude] cli: claude NOT FOUND on PATH` at startup | The image was not built from this Dockerfile — see the Coolify warning above. |
 | `[claude] notAuthenticated` on repeat | Genuinely not signed in. Open `/setup` and connect. If the startup line above also appeared, fix that first: they look the same from the poll loop but are different problems. |
 | `503 cli_not_found` from Connect | Same cause. The server stays up and says so rather than crashing. |
+| `[claude login] process exited (1)` and no sign-in link | The CLI started and refused its arguments. Set `DEBUG_LOGIN=1` and retry to see the CLI's own message. Both invocations are pinned by `test/login.test.ts` and documented in [`docs/provider-research.md` §6.1](docs/provider-research.md) — these are undocumented interfaces and a vendor update can move them. |
 | Signed in but the cookie will not stick | The session cookie is `Secure` over HTTPS. Over plain `http://` it is not set as `Secure`, so local development works — but a proxy that terminates TLS must forward `X-Forwarded-Proto`. |
 
 ## Known limitations
