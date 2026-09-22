@@ -126,7 +126,10 @@ extension APIClient.Failure {
         // we could not read what it said. Collapsing them hid a client-side decode bug
         // behind a label that pointed at the server.
         case .malformed: "BAD RESPONSE"
-        case .server: "SERVER ERROR"
+        // The status, not the word "SERVER ERROR": this line is the only thing the watch
+        // can tell you, so it should say which failure it was. Kept short because it
+        // shares a 41mm screen with the mascot, both windows and a countdown.
+        case .server(let status): "HTTP \(status)"
         }
     }
 }
