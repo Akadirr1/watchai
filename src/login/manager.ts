@@ -4,6 +4,9 @@ import { PROVIDERS, type AIProvider } from "../models/provider.js";
 import { JsonLineChannel, findString } from "./jsonLines.js";
 import { idleSession, LOGIN_TIMEOUT_MS, type LoginSession } from "./session.js";
 
+/** Opt-in, because the vendor CLI's output can contain the verification URL and code. */
+const DEBUG_LOGIN = process.env["DEBUG_LOGIN"] === "1";
+
 const URL_KEYS = ["manualUrl", "manual_url", "verificationUrl", "verification_url"] as const;
 const CODE_KEYS = ["userCode", "user_code"] as const;
 
@@ -77,9 +80,13 @@ export class LoginManager {
 
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
-      // Never log the child's stdout (it can carry account data); stderr is progress text.
+      // The child's output is NOT logged by default, on either stream. stdout can carry
+      // account data, and stderr is where device-flow progress text goes — which is
+      // exactly where the verification URL and user code appear. Neither is under our
+      // control: it comes from an external CLI whose output changes between versions.
+      if (!DEBUG_LOGIN) return;
       const text = chunk.trim();
-      if (text) console.log(`[${provider} login] ${text.slice(0, 200)}`);
+      if (text) console.log(`[${provider} login:debug] ${text.slice(0, 200)}`);
     });
     child.on("exit", (code) => this.onExit(provider, code));
 
@@ -169,6 +176,8 @@ export class LoginManager {
   }
 
   private onExit(provider: AIProvider, code: number | null): void {
+    // Fixed status only — never the child's own words.
+    console.log(`[${provider} login] process exited (${code ?? "signal"})`);
     const session = this.sessions.get(provider);
     this.active.delete(provider);
     if (!session || session.phase !== "waiting") return;

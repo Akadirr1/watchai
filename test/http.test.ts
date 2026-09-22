@@ -7,16 +7,19 @@ import { buildServer } from "../src/http/server.js";
 import { SnapshotStore } from "../src/poll/snapshotStore.js";
 import { Poller } from "../src/poll/poller.js";
 import { LoginManager } from "../src/login/manager.js";
+import { PairingStore } from "../src/pair/index.js";
 
 const TOKEN = "t".repeat(48);
 let app: FastifyInstance;
+let pairing: PairingStore;
 
 beforeAll(async () => {
   const dir = await mkdtemp(join(tmpdir(), "qp-"));
   const dirs = { claude: join(dir, "claude"), codex: join(dir, "codex") };
   const store = new SnapshotStore(dir);
   const poller = new Poller(store, dirs, 60_000, 30_000); // never started
-  app = buildServer({ store, poller, logins: new LoginManager(dirs), authToken: TOKEN });
+  pairing = new PairingStore(dir);
+  app = buildServer({ store, poller, logins: new LoginManager(dirs), pairing, authToken: TOKEN });
   await app.ready();
 });
 
