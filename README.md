@@ -221,11 +221,13 @@ brew install xcodegen && xcodegen generate && open QuotaPets.xcodeproj
 `QUOTAPETS_API_URL` only; the token arrives by QR pairing, so no credential is ever
 compiled into the bundle and rotating `AUTH_TOKEN` never means rebuilding the app.
 
-**Mascots are drawn in code**, not shipped as images — Claude is a radiating spark whose
-arms are the gauge, Codex a terminal window whose cursor is the pulse. In both cases the
-form *is* the expression mechanism, so nothing is bolted on to show mood. As quota drains,
-Claude's crown wilts (the top arms collapse while the lower ones hold it up) and Codex's
-cursor slows from 0.45s to 3s while its glow fades to nothing.
+**Mascots are drawn in code**, not shipped as images. Claude is the pixel critter from
+[Akadirr1/mascot](https://github.com/Akadirr1/mascot), its poses and GSAP timings ported
+to Swift: it looks around, jumps and idles while nothing is happening; walks, tightens its
+bandana and lifts weights while usage is climbing; waves a flag and celebrates under 15%
+left; and sweats once the quota is gone. The bandana is on by default and toggles on the
+last page. Codex is a terminal window whose cursor is the pulse, slowing from 0.45s to 3s
+while its glow fades to nothing.
 
 Pressure comes from the *tighter* window — `min(fiveHour, weekly)` — and the UI marks which
 one, so a tired pet is explainable.

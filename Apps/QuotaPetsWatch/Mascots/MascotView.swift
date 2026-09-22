@@ -1,19 +1,16 @@
 import SwiftUI
 import QuotaPetsShared
 
-/// Art slots (§14).
+/// Art slots (§14), for Codex only: Claude is always the drawn rig (`ClaudeMascotView`).
 ///
-/// The app ships with NO mascot artwork. Drop images into the watch target's asset
-/// catalog under exactly these names and they appear with no code change; until then the
-/// placeholder below renders, which is deliberately obvious rather than a generic emoji
-/// silently standing in for real art.
+/// Drop images into the watch target's asset catalog under exactly these names and they
+/// appear with no code change; until then the drawn pet renders.
 ///
-/// Required assets, per provider and energy state:
-///     claudeMascot-hyper, claudeMascot-happy, claudeMascot-normal,
-///     claudeMascot-tired, claudeMascot-exhausted, claudeMascot-empty
-///     codexMascot-<same six>
-/// A single `claudeMascot` / `codexMascot` is used as a fallback when a per-state image
-/// is missing, so partial art sets still work.
+/// Per energy state:
+///     codexMascot-hyper, codexMascot-happy, codexMascot-normal,
+///     codexMascot-tired, codexMascot-exhausted, codexMascot-empty
+/// A single `codexMascot` is used as a fallback when a per-state image is missing, so
+/// partial art sets still work.
 public enum MascotAsset {
     public static func name(for provider: AIProvider, state: MascotEnergyState) -> String {
         "\(provider.rawValue)Mascot-\(state.rawValue)"
@@ -29,29 +26,39 @@ public enum MascotAsset {
 public struct MascotView: View {
     public let provider: AIProvider
     public let state: MascotEnergyState
+    /// Usage rose since the last snapshot. Only the Claude mascot acts on it.
+    public let working: Bool
     /// Set false when the scene is inactive or the display dimmed, which stops every
     /// animation rather than merely hiding it (§16, §20).
     public let isAnimating: Bool
 
     @State private var breathing = false
 
-    public init(provider: AIProvider, state: MascotEnergyState, isAnimating: Bool) {
+    public init(provider: AIProvider, state: MascotEnergyState, working: Bool, isAnimating: Bool) {
         self.provider = provider
         self.state = state
+        self.working = working
         self.isAnimating = isAnimating
     }
 
     public var body: some View {
-        artwork
-            .frame(maxWidth: .infinity)
-            .scaleEffect(breathing ? idle.scale : 1.0)
-            .offset(y: breathing ? idle.drift : 0)
-            .opacity(state == .empty ? 0.55 : 1.0)
-            .animation(idle.animation, value: breathing)
-            .onAppear { breathing = shouldAnimate }
-            .onChange(of: isAnimating) { _, running in breathing = running && state.wantsIdleAnimation }
-            .onChange(of: state) { _, _ in breathing = shouldAnimate }
-            .accessibilityLabel("\(provider.displayName) mascot, \(state.rawValue)")
+        Group {
+            if provider == .claude {
+                // Animates itself per mood; the generic breathing below would fight it.
+                ClaudeMascotView(state: state, working: working, isAnimating: isAnimating)
+            } else {
+                artwork
+                    .frame(maxWidth: .infinity)
+                    .scaleEffect(breathing ? idle.scale : 1.0)
+                    .offset(y: breathing ? idle.drift : 0)
+                    .opacity(state == .empty ? 0.55 : 1.0)
+                    .animation(idle.animation, value: breathing)
+                    .onAppear { breathing = shouldAnimate }
+                    .onChange(of: isAnimating) { _, running in breathing = running && state.wantsIdleAnimation }
+                    .onChange(of: state) { _, _ in breathing = shouldAnimate }
+            }
+        }
+        .accessibilityLabel("\(provider.displayName) mascot, \(state.rawValue)")
     }
 
     private var shouldAnimate: Bool { isAnimating && state.wantsIdleAnimation }
@@ -67,7 +74,7 @@ public struct MascotView: View {
             // No asset supplied: draw the pet. This is the normal path, not a
             // degraded one — the drawn character animates per energy state, which a
             // static image cannot.
-            PetShapeView(provider: provider, state: state, isAnimating: isAnimating)
+            PetShapeView(state: state, isAnimating: isAnimating)
         }
     }
 

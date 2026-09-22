@@ -10,6 +10,8 @@ import QuotaPetsShared
 public final class SnapshotStore: ObservableObject {
     @Published public private(set) var snapshot: UsageSnapshot?
     @Published public private(set) var thresholds: [String: ThresholdState] = [:]
+    /// Providers busy right now. Not persisted: it only means something between two polls.
+    @Published public private(set) var working: Set<AIProvider> = []
 
     private let url: URL
 
@@ -66,6 +68,7 @@ public final class SnapshotStore: ObservableObject {
                 events.append(contentsOf: result.events)
             }
         }
+        working = incoming.busyProviders(since: snapshot)
         snapshot = incoming
         persist()
         return events

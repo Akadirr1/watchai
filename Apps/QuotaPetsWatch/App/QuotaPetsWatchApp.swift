@@ -146,6 +146,7 @@ private struct UsageTabs: View {
     @EnvironmentObject private var model: WatchModel
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+    @AppStorage("bandana") private var bandana = true
 
     var body: some View {
         TabView {
@@ -157,12 +158,15 @@ private struct UsageTabs: View {
                         SnapshotFreshness.evaluate(generatedAt: $0.generatedAt, now: model.now)
                     },
                     error: model.lastError?.watchLabel,
+                    working: model.store.working.contains(provider),
                     // Animation stops when the scene is inactive OR the display is
                     // dimmed for Always-On (§16, §20).
                     isAnimating: scenePhase == .active && !isLuminanceReduced,
                     now: model.now
                 )
             }
+            Toggle("Bandana", isOn: $bandana)
+                .padding(.horizontal)
         }
         .tabViewStyle(.verticalPage)
         .onChange(of: scenePhase, initial: true) { _, phase in
