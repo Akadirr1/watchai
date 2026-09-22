@@ -5,7 +5,7 @@ import QuotaPetsShared
 ///
 /// This replaces the old phone-relay design entirely. A watchOS app has been able to run
 /// independently and reach the network on its own since watchOS 6, so there is no iPhone
-/// app, no WatchConnectivity, and no pairing step — the watch simply fetches the API.
+/// app and no WatchConnectivity — the watch simply fetches the API.
 ///
 /// That also sidesteps the constraint that shaped the old design: Apple documents that
 /// `sendMessage` from iOS does *not* wake the watch extension, so a phone could never
@@ -22,15 +22,11 @@ public struct APIClient: Sendable {
     private let token: String
     private let session: URLSession
 
-    /// Reads `QUOTAPETS_API_URL` and `QUOTAPETS_API_TOKEN` from the build's Info.plist,
-    /// supplied by a gitignored `Secrets.xcconfig`. Nothing credential-shaped is committed.
-    public init?(bundle: Bundle = .main) {
-        guard
-            let urlString = bundle.object(forInfoDictionaryKey: "QUOTAPETS_API_URL") as? String,
-            let url = URL(string: urlString),
-            let token = bundle.object(forInfoDictionaryKey: "QUOTAPETS_API_TOKEN") as? String,
-            !token.isEmpty
-        else { return nil }
+    /// The server URL comes from the build (`QUOTAPETS_API_URL`, supplied by a gitignored
+    /// `Secrets.xcconfig`). The token does **not**: it is earned by QR pairing and read
+    /// from the Keychain, so no credential is ever compiled into the bundle.
+    public init?(token: String, bundle: Bundle = .main) {
+        guard !token.isEmpty, let url = ServerConfig.baseURL(bundle: bundle) else { return nil }
         self.init(baseURL: url, token: token)
     }
 
