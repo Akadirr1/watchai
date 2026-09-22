@@ -10,6 +10,8 @@ import type { Poller } from "../poll/poller.js";
 import type { SnapshotStore } from "../poll/snapshotStore.js";
 import type { LoginManager } from "../login/manager.js";
 import { createAuthGuard, COOKIE_NAME } from "./auth.js";
+import type { PairingStore } from "../pair/index.js";
+import { PAIR_RESULT_PAGE } from "./pairPage.js";
 import { SETUP_PAGE } from "./setupPage.js";
 
 const STARTED_AT = Date.now();
@@ -33,12 +35,15 @@ export interface ServerDeps {
   store: SnapshotStore;
   poller: Poller;
   logins: LoginManager;
+  pairing: PairingStore;
   authToken: string;
 }
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
   const app = Fastify({ logger: false, trustProxy: true });
-  const auth = createAuthGuard(deps.authToken);
+  const auth = createAuthGuard(deps.authToken, {
+    verifyDeviceToken: (token) => deps.pairing.verifyDeviceToken(token, Date.now()),
+  });
   void app.register(cookie);
 
   app.addHook("onSend", async (_request, reply, payload) => {
@@ -75,14 +80,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         })
         .redirect("/setup", 302);
     }
-    if (!(await auth.guard(request, reply))) return reply;
+    if (!(await auth.guardAdmin(request, reply))) return reply;
     return reply.type("text/html; charset=utf-8").send(SETUP_PAGE);
   });
 
   app.get("/", async (_request, reply) => reply.redirect("/setup", 302));
 
   app.get("/api/usage", async (request, reply) => {
-    if (!(await auth.guard(request, reply))) return reply;
+    if (!(await auth.guardRead(request, reply))) return reply;
     const now = Date.now();
     const snapshot = deps.store.current();
     const hasSnapshot = snapshot.generatedAt > 0;
@@ -116,7 +121,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.get("/api/heartbeat", async (request, reply) => {
-    if (!(await auth.guard(request, reply))) return reply;
+    if (!(await auth.guardRead(request, reply))) return reply;
     const now = Date.now();
     const snapshot = deps.store.current();
     const hasSnapshot = snapshot.generatedAt > 0;
@@ -164,13 +169,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.post("/api/refresh", async (request, reply) => {
-    if (!(await auth.guard(request, reply))) return reply;
+    if (!(await auth.guardAdmin(request, reply))) return reply;
     await Promise.all(PROVIDERS.map((p) => deps.poller.tick(p)));
     return reply.send({ ok: true });
   });
 
   app.post<{ Params: { provider: string } }>("/api/login/:provider/start", async (request, reply) => {
-    if (!(await auth.guard(request, reply))) return reply;
+    if (!(await auth.guardAdmin(request, reply))) return reply;
     const provider = request.params.provider;
     if (!isProvider(provider)) return reply.code(404).send({ error: "unknown_provider" });
     try {
@@ -183,7 +188,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.post<{ Params: { provider: string }; Body: { code?: string } }>(
     "/api/login/:provider/complete",
     async (request, reply) => {
-      if (!(await auth.guard(request, reply))) return reply;
+      if (!(await auth.guardAdmin(request, reply))) return reply;
       const provider = request.params.provider;
       if (!isProvider(provider)) return reply.code(404).send({ error: "unknown_provider" });
       const code = request.body?.code;
@@ -195,10 +200,69 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   );
 
   app.get<{ Params: { provider: string } }>("/api/login/:provider/status", async (request, reply) => {
-    if (!(await auth.guard(request, reply))) return reply;
+    if (!(await auth.guardAdmin(request, reply))) return reply;
     const provider = request.params.provider;
     if (!isProvider(provider)) return reply.code(404).send({ error: "unknown_provider" });
     return reply.send(deps.logins.session(provider));
+  });
+
+  // --- Pairing -------------------------------------------------------------
+  // The watch has no credential yet, so this one endpoint cannot be authenticated.
+  // It is rate limited, and the code it hands back is inert until an authenticated
+  // user claims it.
+  const startLimiter = new Map<string, { count: number; windowStart: number }>();
+
+  app.post("/api/pair/start", async (request, reply) => {
+    const now = Date.now();
+    const entry = startLimiter.get(request.ip);
+    if (!entry || now - entry.windowStart > 60_000) {
+      startLimiter.set(request.ip, { count: 1, windowStart: now });
+    } else if (entry.count >= 10) {
+      return reply.code(429).send({ error: "too_many_attempts" });
+    } else {
+      entry.count += 1;
+    }
+    const session = deps.pairing.start(now);
+    return reply.send({
+      code: session.code,
+      secret: session.secret,
+      expiresAt: new Date(session.expiresAt).toISOString(),
+    });
+  });
+
+  // What the phone's camera opens. Authenticated by the admin cookie, which the user
+  // already has from /setup.
+  app.get<{ Querystring: { c?: string } }>("/pair", async (request, reply) => {
+    if (!(await auth.guardAdmin(request, reply))) return reply;
+    const code = request.query.c;
+    if (!code) return reply.type("text/html; charset=utf-8").send(PAIR_RESULT_PAGE(false, "No code in the link."));
+    const result = deps.pairing.claim(code, Date.now());
+    return reply
+      .type("text/html; charset=utf-8")
+      .send(PAIR_RESULT_PAGE(result.ok, result.ok ? "Your watch will pick this up in a moment." : result.reason));
+  });
+
+  // The watch polls here. Unknown, expired, unclaimed and wrong-secret all answer with
+  // the same 404 so this cannot be used as an oracle.
+  app.post<{ Body: { code?: string; secret?: string } }>("/api/pair/poll", async (request, reply) => {
+    const { code, secret } = request.body ?? {};
+    if (typeof code !== "string" || typeof secret !== "string") {
+      return reply.code(400).send({ error: "missing_fields" });
+    }
+    const token = deps.pairing.poll(code, secret, Date.now());
+    if (!token) return reply.code(404).send({ error: "not_ready" });
+    return reply.send({ deviceToken: token });
+  });
+
+  app.get("/api/devices", async (request, reply) => {
+    if (!(await auth.guardAdmin(request, reply))) return reply;
+    return reply.send({ devices: deps.pairing.list() });
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/devices/:id", async (request, reply) => {
+    if (!(await auth.guardAdmin(request, reply))) return reply;
+    const removed = await deps.pairing.revoke(request.params.id);
+    return removed ? reply.send({ ok: true }) : reply.code(404).send({ error: "unknown_device" });
   });
 
   return app;

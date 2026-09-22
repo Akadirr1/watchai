@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+
+# Generated or vendored — keep them out of diffs and language stats.
+package-lock.json linguist-generated=true -diff
+docs/** linguist-documentation=true
