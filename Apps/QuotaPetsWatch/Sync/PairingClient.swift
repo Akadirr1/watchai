@@ -1,4 +1,5 @@
 import Foundation
+import QuotaPetsShared
 
 /// The watch's half of QR pairing.
 ///
@@ -44,9 +45,9 @@ struct PairingClient: Sendable {
         let (data, response) = try await perform(request)
         try expectOK(response)
 
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let body = try? decoder.decode(StartResponse.self, from: data) else {
+        // NOT `.iso8601`: that strategy cannot read the server's timestamps at all, which
+        // is what made a healthy server report "SERVER ERROR". See ISO8601Decoding.swift.
+        guard let body = try? JSONDecoder.quotaPets().decode(StartResponse.self, from: data) else {
             throw Failure.malformed
         }
         // The QR image is fetched from the URL the watch is configured with, not from the
