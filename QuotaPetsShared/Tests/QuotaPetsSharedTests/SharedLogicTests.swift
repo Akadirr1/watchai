@@ -264,29 +264,6 @@ struct SnapshotTests {
         #expect(decoded == snapshot)
     }
 
-    @Test("error states map to compact Watch labels")
-    func watchLabels() {
-        #expect(ProviderError.notAuthenticated.watchLabel == "AUTH")
-        #expect(ProviderError.networkUnavailable.watchLabel == "OFFLINE")
-        #expect(ProviderError.rateLimited(retryAfter: 30).watchLabel == "STALE")
-        #expect(ProviderError.providerResponseChanged(detail: "x").watchLabel == "PROVIDER ERROR")
-    }
 
-    @Test("only genuinely transient errors are retried")
-    func retryPolicy() {
-        #expect(ProviderError.networkUnavailable.isTransient)
-        #expect(ProviderError.serverError(status: 503).isTransient)
-        #expect(!ProviderError.notAuthenticated.isTransient)
-        #expect(!ProviderError.providerResponseChanged(detail: "x").isTransient)
-        #expect(!ProviderError.rateLimited(retryAfter: nil).isTransient)
-    }
 
-    @Test("HTTP statuses classify as the brief requires")
-    func statusClassification() {
-        #expect(HTTPStatusClassifier.error(for: 200) == nil)
-        #expect(HTTPStatusClassifier.error(for: 401) == .notAuthenticated)
-        #expect(HTTPStatusClassifier.error(for: 403) == .tokenExpired)
-        #expect(HTTPStatusClassifier.error(for: 429, retryAfter: 30) == .rateLimited(retryAfter: 30))
-        #expect(HTTPStatusClassifier.error(for: 503) == .serverError(status: 503))
-    }
 }

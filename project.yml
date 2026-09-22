@@ -1,0 +1,111 @@
+# XcodeGen project definition for QuotaPets.
+#
+# The Xcode project is GENERATED, never committed — a .pbxproj is unreviewable and
+# merge-hostile. On a Mac:
+#
+#     brew install xcodegen && xcodegen generate && open QuotaPets.xcodeproj
+#
+# The watch app is INDEPENDENT: it talks to the QuotaPets server over the network and has
+# no companion iOS app. watchOS has supported this since watchOS 6, and it removes the
+# whole phone-relay layer — which was never going to work well anyway, since Apple
+# documents that sendMessage from iOS does not wake the watch extension.
+#
+# Deployment targets are pinned to watchOS 11 (Apple Watch Series 6 and later). Xcode 26
+# still permits watchOS 8-26.5 deployment targets, so this builds on a current toolchain.
+
+name: QuotaPets
+
+options:
+  bundleIdPrefix: com.quotapets
+  deploymentTarget:
+    watchOS: "11.0"
+  createIntermediateGroups: true
+  xcodeVersion: "16.0"
+
+configFiles:
+  Debug: Secrets.xcconfig
+  Release: Secrets.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    # Set your team here or in Xcode's Signing pane. Left empty so the repo carries no
+    # account-specific state.
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+
+packages:
+  QuotaPetsShared:
+    path: QuotaPetsShared
+
+targets:
+
+  # ---------------------------------------------------------------------------
+  # The product. A modern single-target watchOS app — no WKWatchKitApp, no WatchKit 1.0
+  # extension: mixing legacy watch metadata with a modern SwiftUI target is a known cause
+  # of install failures.
+  # ---------------------------------------------------------------------------
+  QuotaPetsWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: Apps/QuotaPetsWatch
+    dependencies:
+      - package: QuotaPetsShared
+      - target: QuotaPetsWidgets
+        embed: true
+    entitlements:
+      path: Apps/QuotaPetsWatch/QuotaPetsWatch.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.quotapets]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.quotapets.watch
+    info:
+      path: Apps/QuotaPetsWatch/Info.plist
+      properties:
+        CFBundleDisplayName: QuotaPets
+        WKApplication: true
+        # Always-On is wanted: the mascot and countdown are designed to stay legible
+        # while dimmed.
+        WKSupportsAlwaysOnDisplay: true
+        # The only build-time setting, supplied by Secrets.xcconfig (gitignored).
+        # There is deliberately no token here: the watch earns a device token by QR
+        # pairing and keeps it in the Keychain, so the bundle carries no credential.
+        QUOTAPETS_API_URL: $(QUOTAPETS_API_URL)
+
+  # ---------------------------------------------------------------------------
+  # Complications. ONE-WAY DOOR: once a WidgetKit complication ships, the system
+  # permanently stops calling ClockKit timeline APIs. No mixed mode, no fallback.
+  # ---------------------------------------------------------------------------
+  QuotaPetsWidgets:
+    type: app-extension
+    platform: watchOS
+    sources:
+      - path: Apps/QuotaPetsWidgets
+    dependencies:
+      - package: QuotaPetsShared
+    entitlements:
+      path: Apps/QuotaPetsWidgets/QuotaPetsWidgets.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.quotapets]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.quotapets.watch.widgets
+    info:
+      path: Apps/QuotaPetsWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: QuotaPets
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+
+schemes:
+  QuotaPetsWatch:
+    build:
+      targets:
+        QuotaPetsWatch: all
+        QuotaPetsWidgets: all
+    run:
+      config: Debug

@@ -1,6 +1,7 @@
 # Third-Party Notices
 
-QuotaPets ports algorithmic concepts from the projects below. Each ported behaviour is
+QuotaPets ports algorithmic concepts from the projects below. The port now lives in
+TypeScript on the server; the originating Orca file and line are unchanged. Each ported behaviour is
 listed with the exact source file and line it derives from, so the provenance of every
 non-obvious rule in `QuotaPetsShared` is traceable.
 
@@ -18,15 +19,15 @@ Usage-fetching and window-normalisation concepts are derived from Orca.
 
 | QuotaPets | Orca source | Concept |
 |---|---|---|
-| `ClaudeUsagePayload.resolvedUsedPercent` | `claude-usage-window.ts:61-66` | `utilization` takes precedence over `used_percentage` |
-| `ClaudeResetTimestamp` | `claude-usage-window.ts:11-30` | 1e10 magnitude heuristic separating second and millisecond epochs |
-| `ClaudeUsageMapper` | `claude-oauth-usage-request.ts:90-91` | `five_hour` → 5-hour, `seven_day` → weekly |
-| `CodexWindowClassifier` | `codex-rate-limit-window-classification.ts:1-74` | Duration-based window classification, ±1 minute tolerance, narrow positional fallback |
-| `CodexResetTimestamp` | `codex-rate-limit-window-mapper.ts:14-16` | `reset_at` is unconditionally Unix seconds |
-| `CodexWindowPayload.durationMinutes` | `codex-backend-usage-client.ts:39-45` | `ceil(limit_window_seconds / 60)`, positive values only |
-| `CodexUsageMapper.decode` | `codex-backend-usage-client.ts:74-76` | Absent `plan_type` signals a schema change |
-| `UsageWindow.clamp` | `claude-usage-window.ts:71`, `codex-rate-limit-window-mapper.ts:32` | Clamp used percentage into 0...100 |
-| `ProviderError` / `HTTPStatusClassifier` | `rate-limit-types.ts:20-34` | Failure-kind taxonomy |
+| `resolveClaudeUsedPercent` (src/usage/claudeMapper.ts) | `claude-usage-window.ts:61-66` | `utilization` takes precedence over `used_percentage` |
+| `claudeResetAt` (src/usage/claudeResetTimestamp.ts) | `claude-usage-window.ts:11-30` | 1e10 magnitude heuristic separating second and millisecond epochs |
+| `mapClaudeUsage` (src/usage/claudeMapper.ts) | `claude-oauth-usage-request.ts:90-91` | `five_hour` → 5-hour, `seven_day` → weekly |
+| `classifyCodexWindows` (src/usage/codexWindowClassifier.ts) | `codex-rate-limit-window-classification.ts:1-74` | Duration-based window classification, ±1 minute tolerance, narrow positional fallback |
+| `codexResetAt` (src/usage/codexResetTimestamp.ts) | `codex-rate-limit-window-mapper.ts:14-16` | `reset_at` is unconditionally Unix seconds |
+| `parseCodexWindow` (src/usage/codexMapper.ts) | `codex-backend-usage-client.ts:39-45` | `ceil(limit_window_seconds / 60)`, positive values only |
+| `decodeCodexUsage` (src/usage/codexMapper.ts) | `codex-backend-usage-client.ts:74-76` | Absent `plan_type` signals a schema change |
+| `clampPercent` (src/models/usageWindow.ts) | `claude-usage-window.ts:71`, `codex-rate-limit-window-mapper.ts:32` | Clamp used percentage into 0...100 |
+| `ProviderError` / `classifyStatus` (src/usage/providerError.ts) | `rate-limit-types.ts:20-34` | Failure-kind taxonomy |
 
 Deliberate divergences are documented in `docs/provider-research.md` §3.5 — notably that
 QuotaPets keeps two separate reset-timestamp decoders rather than one shared helper,

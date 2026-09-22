@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# A new push to the same branch makes the previous run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    name: Server (Node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # `ci`, not `install`: the lockfile is tracked precisely so builds are reproducible.
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  watch-core:
+    name: Watch core (Swift 6, Linux)
+    runs-on: ubuntu-latest
+    # QuotaPetsShared is Foundation-only on purpose, which is what lets the provider
+    # parsing traps be tested here rather than only on someone's Mac.
+    container: swift:6.0
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift build
+        working-directory: QuotaPetsShared
+      - run: swift test
+        working-directory: QuotaPetsShared
+
+  image:
+    name: Container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # Built, never pushed. This is the artifact that actually gets deployed, and a
+      # Dockerfile that only breaks at deploy time is the most expensive kind.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

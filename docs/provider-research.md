@@ -1,8 +1,11 @@
 # QuotaPets — Provider Research (Phase 0)
 
-**Status:** Phase 0 complete. No product code written yet.
-**Date:** 2026-09-09
-**Purpose:** Satisfy §0/§42 — research before implementation.
+**Status:** Research complete and implemented. §1–§5 remain authoritative on provider
+mechanics; §6 records the architecture that was actually built (it has been rewritten
+twice as the deployment shape changed — the *findings* never did).
+**Researched:** 2026-09-09 · **Architecture updated:** 2026-09-22
+**Purpose:** Establish, from primary sources, how each provider's usage and login actually
+work — so no part of this project is built on a guess.
 
 > **Rule applied throughout:** every provider fact is cited to a file+line in a source tree that was
 > actually cloned and read, or to an official document that was actually fetched. Where something
@@ -352,42 +355,107 @@ and states the watchOS target's capabilities *"don't depend on your program memb
 
 ---
 
-## 6. Resulting architecture — Mac helper relay
+## 6. Resulting architecture — self-hosted server + independent watch
 
-Given §4.3, credentials are never acquired on iOS. The helper is promoted from the brief's §12
-("document only, future") to **the MVP credential path**, because research shows it is the only
-design that is both legitimate and functional.
+> **Superseded twice.** This section originally described a Mac helper relaying to an
+> iPhone, then a server reading the host's `~/.claude`. Both are gone. The findings in
+> §1–§5 are unchanged and still authoritative; only the deployment shape moved.
+
+Given §4.3, credentials are never acquired by writing our own OAuth. Given that the user
+already runs a server, the helper does not need to be a Mac.
 
 ```
-  claude / codex CLIs  (user's own first-party logins, unmodified)
-            │  writes
-            ▼
-  macOS Keychain · ~/.claude/.credentials.json · ~/.codex/auth.json
-            │  read by
-            ▼
-  QuotaPetsHelper (macOS)  ──  Orca-derived fetch + normalise
-            │  UsageSnapshot only, over LAN, paired + authenticated
-            ▼
-  QuotaPetsPhone (iOS 18)  ──  cache · BGAppRefreshTask · WCSession
-            │  UsageSnapshot only
-            ▼
-  QuotaPetsWatch (watchOS 11)  +  QuotaPetsWidgets complications
+  Browser ──"Connect Claude"──▶ Server (container)
+                                  ├─ starts the real claude / codex CLI (stdio-JSON)
+                                  ├─ relays the CLI's own sign-in URL to the browser
+                                  └─ the CLI writes its credential to the container's
+                                     OWN config dir — not the host's
+                                        │
+                                  polls the two usage endpoints every 60s
+                                        │
+                                  JSON API over HTTPS + shared token
+                                        ▼
+                                  Apple Watch (independent watchOS app)
 ```
 
-**No provider credential ever leaves the Mac.** The phone holds no `accessToken`, so the §6 Keychain
-requirement narrows to storing only the helper pairing secret — a strictly smaller attack surface
-than the brief anticipated.
+**Why the container owns its own credential.** Three problems collapse at once:
 
-**The QR pairing flow (§4/§23) fits this exactly and is retained unchanged in spirit:** the watch
-shows a QR, the phone scans it, and the payload is an ephemeral, expiring, single-use
-`quotapets://pair?nonce=…` — now additionally carrying the helper's discovered LAN endpoint. It still
-contains **no provider tokens**, satisfying §4's constraint literally.
+1. No SSH needed for setup — the sign-in happens in a browser.
+2. No contention with anything else on the host. Refresh-token rotation is the hazard
+   here: refreshing a credential another process owns can strand its copy, and OAuth 2.1
+   reuse-detection may revoke the whole family. With a separate grant in a separate
+   config dir, refreshing is simply safe.
+3. No file-permission or UID matching. The vendor CLIs chmod their credential files back
+   to `0600` after every write, so no durable ACL workaround exists — the only way to read
+   a host credential from a container is to run as its owner. Owning our own removes the
+   question.
 
-Transport: Bonjour/`NWBrowser` discovery + HTTPS over LAN with a pairing-derived shared secret.
-Unlike the loopback case, LAN access **does** require `NSLocalNetworkUsageDescription`.
+**Both CLIs expose a programmatic, TTY-free login path** (verified from source): Claude via
+SDK control-protocol subtypes `claude_authenticate` / `claude_oauth_callback`, Codex via
+its app-server JSON-RPC `account/login/start` with `chatgptDeviceCode`. Neither opens a
+browser or needs a PTY, so no `script`/`node-pty` machinery is required.
 
-**Honest limitation:** usage only refreshes while the Mac is awake and reachable. When it is not, the
-phone and watch show cached values with explicit staleness (`STALE · 8m`), exactly as §10 demands.
+⚠️ The Claude subtypes are marked `@internal` and stripped from the public SDK types. They
+are what first-party clients use, but carry no stability guarantee. Documented fallback: a
+one-off `docker exec <container> claude auth login` into the same config dir.
+
+### 6.1 Two invocation rules, found only by running the real binaries
+
+Phase 0 read both protocols from source and got the *messages* right. It did not catch how
+either process has to be started. Both of these were found in production, and both failed
+in the same misleading way — the login produced no URL, while the poll loop kept printing
+`notAuthenticated`, which reads as "you have not signed in yet".
+
+**Claude requires `--verbose`.** Verified against `claude` 2.1.280:
+
+```
+$ claude -p --input-format stream-json --output-format stream-json
+Error: When using --print, --output-format=stream-json requires --verbose
+$ echo $?
+1
+```
+
+The flag does not make the child noisier for us — its output is JSON either way.
+
+**The Codex app-server requires an LSP-shaped handshake.** Verified against `codex-cli`
+0.155.1. Sending the login request first:
+
+```
+→ {"jsonrpc":"2.0","id":1,"method":"account/login/start","params":{"type":"chatgptDeviceCode"}}
+← {"error":{"code":-32600,"message":"Not initialized"},"id":1}
+```
+
+With `initialize` + the `initialized` notification in front of it:
+
+```
+→ {"jsonrpc":"2.0","id":0,"method":"initialize","params":{"clientInfo":{…}}}
+← {"id":0,"result":{"userAgent":"…","codexHome":"…","platformOs":"linux"}}
+→ {"jsonrpc":"2.0","method":"initialized","params":{}}
+→ {"jsonrpc":"2.0","id":1,"method":"account/login/start","params":{"type":"chatgptDeviceCode"}}
+← {"id":1,"result":{"type":"chatgptDeviceCode","loginId":"…",
+     "verificationUrl":"https://auth.openai.com/codex/device","userCode":"XXXX-XXXXX"}}
+```
+
+The three messages can be written back to back without awaiting the response: stdin is
+processed in order.
+
+`account/login/completed` — the notification §4.2 documents as the completion signal — is
+present in the shipped `codex` binary. That one has **not** been exercised end to end here,
+because doing so would mean completing a real device-code login.
+
+Both rules are pinned by `test/login.test.ts`, which records what the manager actually
+writes to a stand-in CLI. These are undocumented, unversioned interfaces; a test that
+fixes the invocation is what turns the next change into a red build rather than another
+silent one.
+
+**Token refresh is performed by QuotaPets, not the CLI.** This is a correction to an
+earlier assumption: both CLIs refresh *lazily*, only when a command runs, and after login
+nothing invokes them again — so left alone, the token would simply expire. Refreshing is
+safe only because of the separate-grant property above. The exact requests are in §4.1 and
+§4.2 and were implemented verbatim.
+
+**Honest limitation:** the watch shows cached values with explicit staleness whenever the
+server is unreachable, exactly as the original brief demanded.
 
 ---
 
