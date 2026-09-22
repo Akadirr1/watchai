@@ -16,22 +16,25 @@ struct QuotaPetsWatchApp: App {
 @MainActor
 final class WatchModel: ObservableObject {
     @Published private(set) var store = SnapshotStore()
+    @Published private(set) var lastError: APIClient.Failure?
     @Published var now = Date()
-    private(set) var sync: WatchSyncService!
-    /// Foreground-only ticker. Stopped the moment the scene leaves `.active`, so nothing
-    /// pretends to survive suspension (§10, §20).
-    private var ticker: Timer?
 
-    init() {
-        let store = self.store
-        sync = WatchSyncService(store: store) { events in
-            WatchModel.playHaptics(for: events)
-        }
+    private let client: APIClient?
+    /// Foreground-only ticker. Stopped the moment the scene leaves `.active`, so nothing
+    /// pretends to survive suspension.
+    private var ticker: Timer?
+    /// Guards against the timer and an onAppear both fetching at once.
+    private var inFlight = false
+
+    init(client: APIClient? = APIClient()) {
+        self.client = client
     }
 
+    var isConfigured: Bool { client != nil }
+
     func becameActive() {
-        // Show cached data instantly, then ask for fresh (§9).
-        sync.requestRefresh()
+        // Cached data is already on screen; ask for fresh in the background.
+        refresh()
         startTicking()
     }
 
@@ -40,24 +43,56 @@ final class WatchModel: ObservableObject {
         ticker = nil
     }
 
-    /// One timer drives both the clock label and the refresh request, so there is no
-    /// second polling loop to duplicate (§9).
+    /// One timer drives both the clock label and the fetch, so there is no second polling
+    /// loop to duplicate.
     private func startTicking() {
         ticker?.invalidate()
-        let t = Timer(timeInterval: RefreshSchedule.foregroundInterval, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.now = Date()
-                self?.sync.requestRefresh()
+                self?.refresh()
             }
         }
-        RunLoop.main.add(t, forMode: .common)
-        ticker = t
+        RunLoop.main.add(timer, forMode: .common)
+        ticker = timer
     }
 
-    /// Subtle while active, stronger for a weekly recharge (§21).
+    func refresh() {
+        guard let client, !inFlight else { return }
+        inFlight = true
+        Task { @MainActor in
+            defer { inFlight = false }
+            do {
+                let snapshot = try await client.fetchSnapshot()
+                let events = store.apply(snapshot)
+                lastError = nil
+                if !events.isEmpty { WatchModel.playHaptics(for: events) }
+            } catch let failure as APIClient.Failure {
+                // A failed fetch is not an error state on screen: the cached snapshot
+                // stays with its own freshness label. Only the reason is recorded.
+                lastError = failure
+            } catch {
+                lastError = .offline
+            }
+        }
+    }
+
+    /// Subtle while active, stronger for a weekly recharge.
     private static func playHaptics(for events: [QuotaEvent]) {
         guard let strongest = events.max(by: { !$0.isMajor && $1.isMajor }) else { return }
         WKInterfaceDevice.current().play(strongest.isMajor ? .success : .click)
+    }
+}
+
+extension APIClient.Failure {
+    /// Compact labels for a 41mm screen — never a raw HTTP error.
+    var watchLabel: String {
+        switch self {
+        case .unauthorized: "AUTH"
+        case .offline: "OFFLINE"
+        case .malformed: "SERVER ERROR"
+        case .server: "SERVER ERROR"
+        }
     }
 }
 
@@ -75,7 +110,7 @@ struct WatchRootView: View {
                     freshness: model.store.snapshot.map {
                         SnapshotFreshness.evaluate(generatedAt: $0.generatedAt, now: model.now)
                     },
-                    error: nil,
+                    error: model.lastError?.watchLabel,
                     // Animation stops when the scene is inactive OR the display is
                     // dimmed for Always-On (§16, §20).
                     isAnimating: scenePhase == .active && !isLuminanceReduced,

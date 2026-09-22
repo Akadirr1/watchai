@@ -2,26 +2,12 @@ import WidgetKit
 import SwiftUI
 import QuotaPetsShared
 
-/// Shared container between the watch app and this extension.
-///
-/// App Groups are available on a free Personal Team — Apple's watchOS capability
-/// reference checks "App groups" in the free column and states the watch target's
-/// capabilities "don't depend on your program membership" (research §5). Verified,
-/// because an earlier assumption to the contrary would have forced a redesign.
-enum SharedContainer {
-    static let appGroup = "group.com.quotapets"
-
-    static func snapshotURL() -> URL? {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: appGroup)?
-            .appendingPathComponent("snapshot.json")
-    }
-
-    static func loadSnapshot() -> UsageSnapshot? {
-        guard let url = snapshotURL(), let data = try? Data(contentsOf: url) else { return nil }
-        struct Persisted: Decodable { let snapshot: UsageSnapshot? }
-        return try? JSONDecoder().decode(Persisted.self, from: data).snapshot
-    }
+/// Reads what the watch app wrote. Never fetches — the widget has no network budget to
+/// spend, and the app is the only thing that talks to the server.
+func loadSharedSnapshot() -> UsageSnapshot? {
+    guard let data = try? Data(contentsOf: SharedContainer.snapshotURL()) else { return nil }
+    struct Persisted: Decodable { let snapshot: UsageSnapshot? }
+    return try? JSONDecoder().decode(Persisted.self, from: data).snapshot
 }
 
 struct QuotaEntry: TimelineEntry {
@@ -45,12 +31,12 @@ struct QuotaProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (QuotaEntry) -> Void) {
-        completion(QuotaEntry(date: Date(), snapshot: SharedContainer.loadSnapshot()))
+        completion(QuotaEntry(date: Date(), snapshot: loadSharedSnapshot()))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<QuotaEntry>) -> Void) {
         let now = Date()
-        let entry = QuotaEntry(date: now, snapshot: SharedContainer.loadSnapshot())
+        let entry = QuotaEntry(date: now, snapshot: loadSharedSnapshot())
         // One entry, refreshed on the system's own schedule. Asking for more would spend
         // budget to display values that cannot have changed.
         completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(20 * 60))))

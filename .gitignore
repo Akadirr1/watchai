@@ -61,3 +61,6 @@ Package.resolved
 # ---------------------------------------------------------------
 QuotaPets.xcodeproj/
 Apps/*/Info.plist
+
+# Watch app build-time secrets (see Secrets.xcconfig.example)
+Secrets.xcconfig
