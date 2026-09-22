@@ -12,6 +12,7 @@ import type { LoginManager } from "../login/manager.js";
 import { createAuthGuard, COOKIE_NAME } from "./auth.js";
 import type { PairingStore } from "../pair/index.js";
 import { PAIR_RESULT_PAGE } from "./pairPage.js";
+import { publicOrigin, pairingURL, renderPairingQR } from "../pair/qr.js";
 import { SETUP_PAGE } from "./setupPage.js";
 
 const STARTED_AT = Date.now();
@@ -212,6 +213,18 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // user claims it.
   const startLimiter = new Map<string, { count: number; windowStart: number }>();
 
+  // The QR image itself. Unauthenticated for the same reason as /start — the watch has
+  // no credential yet — and harmless, because the code it encodes is inert until an
+  // authenticated user claims it.
+  app.get<{ Querystring: { c?: string } }>("/api/pair/qr", async (request, reply) => {
+    const code = request.query.c;
+    if (!code || !/^[A-Z2-9]{8}$/.test(code)) {
+      return reply.code(400).send({ error: "bad_code" });
+    }
+    const png = await renderPairingQR(pairingURL(publicOrigin(request), code));
+    return reply.type("image/png").send(png);
+  });
+
   app.post("/api/pair/start", async (request, reply) => {
     const now = Date.now();
     const entry = startLimiter.get(request.ip);
@@ -223,10 +236,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       entry.count += 1;
     }
     const session = deps.pairing.start(now);
+    const origin = publicOrigin(request);
     return reply.send({
       code: session.code,
       secret: session.secret,
       expiresAt: new Date(session.expiresAt).toISOString(),
+      // Handed back so the watch does not have to reconstruct either of these.
+      pairingUrl: pairingURL(origin, session.code),
+      qrUrl: `${origin}/api/pair/qr?c=${session.code}`,
     });
   });
 
