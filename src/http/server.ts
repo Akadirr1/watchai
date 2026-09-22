@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
 import { PROVIDERS, type AIProvider } from "../models/provider.js";
 import { remainingPercent } from "../models/usageWindow.js";
@@ -14,6 +14,8 @@ import type { PairingStore } from "../pair/index.js";
 import { PAIR_RESULT_PAGE } from "./pairPage.js";
 import { publicOrigin, pairingURL, renderPairingQR } from "../pair/qr.js";
 import { SETUP_PAGE } from "./setupPage.js";
+import { LOGIN_PAGE } from "./loginPage.js";
+import { missingCLIHint } from "../login/availability.js";
 
 const STARTED_AT = Date.now();
 
@@ -29,6 +31,36 @@ function serialiseWindow(window: ProviderUsage["fiveHour"], now: number) {
     resetAt: window.resetAt === null ? null : new Date(window.resetAt).toISOString(),
     resetIn: countdownUntil(window.resetAt, now),
     durationSec: window.durationSec,
+  };
+}
+
+/**
+ * Where to send someone once they have signed in.
+ *
+ * Same-site paths only. `//evil.com` and `/\evil.com` are both absolute to a browser, so
+ * an open redirect is exactly one missing check away. It matters here because the QR
+ * flow's natural landing page is `/pair?c=CODE`, which a signed-out phone has to be
+ * returned to.
+ */
+export function safeNext(raw: unknown, fallback = "/setup"): string {
+  if (typeof raw !== "string" || raw.length > 512) return fallback;
+  if (!/^\/[^/\\]/.test(raw)) return fallback;
+  if (/[\u0000-\u001f\u007f]/.test(raw)) return fallback;
+  return raw;
+}
+
+/**
+ * `secure` was hard-coded true, which meant a browser silently dropped the cookie over
+ * plain HTTP and signing in locally was impossible. `trustProxy` is on, so behind a TLS
+ * terminator this still reads https.
+ */
+function sessionCookie(request: FastifyRequest) {
+  return {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: request.protocol === "https",
+    maxAge: 31_536_000,
   };
 }
 
@@ -76,13 +108,24 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const supplied = (request.query as Record<string, string> | undefined)?.["t"];
     if (supplied && auth.matches(supplied)) {
       return reply
-        .setCookie(COOKIE_NAME, supplied, {
-          path: "/", httpOnly: true, sameSite: "lax", secure: true, maxAge: 31_536_000,
-        })
+        .setCookie(COOKIE_NAME, supplied, sessionCookie(request))
         .redirect("/setup", 302);
     }
-    if (!(await auth.guardAdmin(request, reply))) return reply;
+    // A browser gets the sign-in form rather than a JSON body it cannot act on.
+    const ok = await auth.guardAdminPage(request, reply, (reason) => LOGIN_PAGE("/setup", reason));
+    if (!ok) return reply;
     return reply.type("text/html; charset=utf-8").send(SETUP_PAGE);
+  });
+
+  /**
+   * What the sign-in form posts to. The token is swapped for the same cookie `?t=` sets,
+   * so there is one session mechanism, not two — and it never lands in the URL bar, in
+   * history, or in a Referer.
+   */
+  app.post<{ Body: { token?: unknown } }>("/api/session", async (request, reply) => {
+    const token = (request.body ?? {}).token;
+    if (!(await auth.signIn(request, reply, token))) return reply;
+    return reply.setCookie(COOKIE_NAME, token as string, sessionCookie(request)).send({ ok: true });
   });
 
   app.get("/", async (_request, reply) => reply.redirect("/setup", 302));
@@ -153,12 +196,23 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       };
     }
 
+    // Reported separately from provider state because "no token yet" and "the binary is
+    // not installed" are different problems that otherwise look identical from here.
+    // Asked of the login manager rather than resolved again here, so this can never
+    // disagree with what /api/login/:provider/start will do. Availability only — never
+    // the resolved path, which is container-internal.
+    const tools: Record<string, unknown> = {};
+    for (const provider of PROVIDERS) {
+      tools[provider] = { available: deps.logins.cliAvailable(provider) };
+    }
+
     // `ok` tracks the process, not the providers — nobody should wire an alert to it that
     // fires every time a vendor sneezes.
     return reply.send({
       ok: true,
       now: new Date(now).toISOString(),
       uptimeSec: Math.round((now - STARTED_AT) / 1000),
+      tools,
       snapshot: {
         generatedAt: hasSnapshot ? new Date(snapshot.generatedAt).toISOString() : null,
         ageSec: hasSnapshot ? Math.round(fresh.ageSec) : null,
@@ -179,6 +233,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!(await auth.guardAdmin(request, reply))) return reply;
     const provider = request.params.provider;
     if (!isProvider(provider)) return reply.code(404).send({ error: "unknown_provider" });
+    // Answered before anything is spawned. Without this the only signal was a crashed
+    // process, which read as an outage rather than a missing dependency.
+    if (!deps.logins.cliAvailable(provider)) {
+      return reply.code(503).send({ error: "cli_not_found", hint: missingCLIHint(provider) });
+    }
     try {
       return reply.send(await deps.logins.start(provider));
     } catch (error) {
@@ -250,7 +309,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // What the phone's camera opens. Authenticated by the admin cookie, which the user
   // already has from /setup.
   app.get<{ Querystring: { c?: string } }>("/pair", async (request, reply) => {
-    if (!(await auth.guardAdmin(request, reply))) return reply;
+    // A phone that scans the watch's QR without a session used to land on a JSON 401 —
+    // a dead end in the middle of the one flow this page exists for. It now gets the
+    // sign-in form and is returned here, code and all.
+    const ok = await auth.guardAdminPage(request, reply, (reason) =>
+      LOGIN_PAGE(safeNext(request.url), reason),
+    );
+    if (!ok) return reply;
     const code = request.query.c;
     if (!code) return reply.type("text/html; charset=utf-8").send(PAIR_RESULT_PAGE(false, "No code in the link."));
     const result = deps.pairing.claim(code, Date.now());

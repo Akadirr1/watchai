@@ -59,14 +59,33 @@ machine was using it.
 
 ### Coolify
 
-1. New Resource → Application → your repository → **Dockerfile** build pack.
+1. New Resource → Application → your repository → **Build Pack: `Dockerfile`**, Dockerfile
+   Location `/Dockerfile`.
+
+   > ⚠️ **This one matters.** Coolify defaults to Nixpacks, which will happily build and
+   > start the server — but Nixpacks knows nothing about the two vendor CLIs this image
+   > installs, so sign-in has nothing to run. Symptoms: `[claude] cli: claude NOT FOUND on
+   > PATH` in the logs, an orange banner on `/setup`, and a `503 cli_not_found` if you
+   > press Connect. The tell in the logs is an `npm run start` banner — this Dockerfile's
+   > `CMD` never goes through npm.
+
 2. Environment variable: `AUTH_TOKEN` = output of `openssl rand -hex 32`. Turn *off*
    "Build Variable" so it isn't baked into an image layer.
-3. Domains → your subdomain, Force HTTPS on.
-4. Deploy, then open `https://<your-domain>/setup?t=<AUTH_TOKEN>` and connect each account.
+3. Domains → your subdomain, Force HTTPS on. Set `PUBLIC_URL` to that same URL.
+4. Deploy, open `https://<your-domain>/setup`, sign in with your `AUTH_TOKEN`, and connect
+   each account.
 
 **Optional but recommended:** Persistent Storage → Add, destination `/data`. Without it a
 redeploy starts a fresh container and you sign in again. Nothing else needs a volume.
+
+### Signing in
+
+`/setup` asks for your `AUTH_TOKEN` and keeps it in an `HttpOnly` cookie on that device.
+`https://<your-domain>/setup?t=<AUTH_TOKEN>` still works for scripting — the token is
+swapped for the same cookie and stripped from the URL by a redirect.
+
+Failed attempts are rate limited per IP, and the server never distinguishes "no token"
+from "wrong token": both answer 401, because the difference is a probing oracle.
 
 ### Locally
 
@@ -143,9 +162,10 @@ poll endpoint cannot be used as an oracle.
 |---|---|---|
 | `GET /healthz` | none | Liveness. Zero I/O, leaks nothing. |
 | `GET /api/usage` | admin **or** device | The snapshot the watch fetches |
-| `GET /api/heartbeat` | admin **or** device | Freshness, per-provider state, last error |
+| `GET /api/heartbeat` | admin **or** device | Freshness, per-provider state, last error, and whether each vendor CLI is installed |
+| `POST /api/session` | the token itself | What the sign-in form posts to; returns the session cookie |
 | `POST /api/refresh` | admin | Nudges the poll loop; joins an in-flight request |
-| `GET /setup` | admin | Sign-in and device management — the only real page served |
+| `GET /setup` | admin | Sign-in and device management. A browser gets a sign-in form on 401; everything else gets JSON |
 | `POST /api/login/:provider/start` · `/complete` · `GET /status` | admin | Drives the vendor CLI |
 | `GET /api/devices` · `DELETE /api/devices/:id` | admin | List and revoke paired watches |
 | `GET /pair?c=CODE` | admin | What the phone's camera opens; claims a code |
@@ -228,7 +248,7 @@ Personal Team.
 ## Testing
 
 ```bash
-npm test                              # server: 118 tests
+npm test                              # server: 133 tests
 cd QuotaPetsShared && swift test      # watch core: 26 tests, runs on Linux too
 ```
 
@@ -238,6 +258,16 @@ project still require macOS and have **not** been compiled — expect to fix com
 on the first build.
 
 ---
+
+## If something looks wrong
+
+| Symptom | |
+|---|---|
+| `{"error":"unauthorized"}` in a browser | You are on an `/api/*` route. Person-facing pages (`/setup`, `/pair`) serve a sign-in form instead. |
+| `[claude] cli: claude NOT FOUND on PATH` at startup | The image was not built from this Dockerfile — see the Coolify warning above. |
+| `[claude] notAuthenticated` on repeat | Genuinely not signed in. Open `/setup` and connect. If the startup line above also appeared, fix that first: they look the same from the poll loop but are different problems. |
+| `503 cli_not_found` from Connect | Same cause. The server stays up and says so rather than crashing. |
+| Signed in but the cookie will not stick | The session cookie is `Secure` over HTTPS. Over plain `http://` it is not set as `Secure`, so local development works — but a proxy that terminates TLS must forward `X-Forwarded-Proto`. |
 
 ## Known limitations
 

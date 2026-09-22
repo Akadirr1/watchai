@@ -44,6 +44,16 @@ class FailureLimiter {
   }
 }
 
+/**
+ * Whether this request came from a browser navigating, rather than from the watch or a
+ * script. Only the two routes a person can land on consult it; `/api/*` answers JSON to
+ * everyone, always.
+ */
+export function wantsHTML(request: FastifyRequest): boolean {
+  const accept = request.headers.accept;
+  return typeof accept === "string" && accept.includes("text/html");
+}
+
 export interface AuthGuardOptions {
   /** Returns true when the presented token belongs to a paired device. */
   readonly verifyDeviceToken?: (token: string) => boolean;
@@ -75,16 +85,53 @@ export function createAuthGuard(expectedToken: string, options: AuthGuardOptions
     return true;
   }
 
+  /**
+   * Admin only. Gates /setup, pairing and device management — anything that could mint or
+   * revoke access.
+   */
+  async function guardAdmin(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
+    if (await overLimit(request, reply)) return false;
+    if (matches(presentedToken(request))) return true;
+    return reject(request, reply);
+  }
+
   return {
     matches,
+    guardAdmin,
 
     /**
-     * Admin only. Gates /setup, pairing and device management — anything that could
-     * mint or revoke access.
+     * Admin only, for the two routes a person can land on in a browser. Identical to
+     * `guardAdmin` except that a browser is handed a sign-in page instead of a JSON body
+     * it cannot act on. Same status codes, same limiter, and still no way to tell an
+     * absent token from a wrong one.
      */
-    async guardAdmin(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
-      if (await overLimit(request, reply)) return false;
+    async guardAdminPage(
+      request: FastifyRequest,
+      reply: FastifyReply,
+      renderPage: (reason: "unauthorized" | "too_many_attempts") => string,
+    ): Promise<boolean> {
+      if (!wantsHTML(request)) return guardAdmin(request, reply);
+      if (limiter.blocked(request.ip)) {
+        await reply.code(429).type("text/html; charset=utf-8").send(renderPage("too_many_attempts"));
+        return false;
+      }
       if (matches(presentedToken(request))) return true;
+      limiter.record(request.ip);
+      await reply
+        .code(401)
+        .header("WWW-Authenticate", "Bearer")
+        .type("text/html; charset=utf-8")
+        .send(renderPage("unauthorized"));
+      return false;
+    },
+
+    /**
+     * Verifies a token submitted by the sign-in form. Deliberately routed through the same
+     * limiter as every other attempt — a form is not a bypass.
+     */
+    async signIn(request: FastifyRequest, reply: FastifyReply, token: unknown): Promise<boolean> {
+      if (await overLimit(request, reply)) return false;
+      if (typeof token === "string" && matches(token)) return true;
       return reject(request, reply);
     },
 
