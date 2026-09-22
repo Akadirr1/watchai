@@ -3,6 +3,7 @@ import { config, credentialDirs } from "./config.js";
 import { SnapshotStore } from "./poll/snapshotStore.js";
 import { Poller } from "./poll/poller.js";
 import { LoginManager } from "./login/manager.js";
+import { PairingStore } from "./pair/index.js";
 import { buildServer } from "./http/server.js";
 
 async function main(): Promise<void> {
@@ -24,8 +25,10 @@ async function main(): Promise<void> {
     config.codexStaggerSec * 1000,
   );
   const logins = new LoginManager(credentialDirs);
+  const pairing = new PairingStore(config.dataDir);
+  await pairing.load();
 
-  const app = buildServer({ store, poller, logins, authToken: config.authToken });
+  const app = buildServer({ store, poller, logins, pairing, authToken: config.authToken });
   await app.listen({ port: config.port, host: config.host });
   poller.start();
   console.log(`quotapets listening on ${config.host}:${config.port}`);

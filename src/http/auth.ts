@@ -44,7 +44,12 @@ class FailureLimiter {
   }
 }
 
-export function createAuthGuard(expectedToken: string) {
+export interface AuthGuardOptions {
+  /** Returns true when the presented token belongs to a paired device. */
+  readonly verifyDeviceToken?: (token: string) => boolean;
+}
+
+export function createAuthGuard(expectedToken: string, options: AuthGuardOptions = {}) {
   const matches = makeTokenMatcher(expectedToken);
   const limiter = new FailureLimiter();
 
@@ -57,24 +62,43 @@ export function createAuthGuard(expectedToken: string) {
     return cookies?.[COOKIE_NAME];
   }
 
+  async function reject(request: FastifyRequest, reply: FastifyReply): Promise<false> {
+    limiter.record(request.ip);
+    // Never distinguish "absent" from "wrong" — that is a probing oracle.
+    await reply.code(401).header("WWW-Authenticate", "Bearer").send({ error: "unauthorized" });
+    return false;
+  }
+
+  async function overLimit(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
+    if (!limiter.blocked(request.ip)) return false;
+    await reply.code(429).send({ error: "too_many_attempts" });
+    return true;
+  }
+
   return {
     matches,
-    /** Returns true when the request may proceed; otherwise it has already been answered. */
-    async guard(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
-      const ip = request.ip;
-      if (limiter.blocked(ip)) {
-        await reply.code(429).send({ error: "too_many_attempts" });
-        return false;
-      }
-      if (matches(presentedToken(request))) return true;
 
-      limiter.record(ip);
-      // Never distinguish "absent" from "wrong" — that is a probing oracle.
-      await reply
-        .code(401)
-        .header("WWW-Authenticate", "Bearer")
-        .send({ error: "unauthorized" });
-      return false;
+    /**
+     * Admin only. Gates /setup, pairing and device management — anything that could
+     * mint or revoke access.
+     */
+    async guardAdmin(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
+      if (await overLimit(request, reply)) return false;
+      if (matches(presentedToken(request))) return true;
+      return reject(request, reply);
+    },
+
+    /**
+     * Admin token OR a paired device token. Gates the read-only usage surface, which is
+     * all a watch ever needs — so a lost watch is one revoked device, not a rotated
+     * admin credential.
+     */
+    async guardRead(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
+      if (await overLimit(request, reply)) return false;
+      const token = presentedToken(request);
+      if (matches(token)) return true;
+      if (token && options.verifyDeviceToken?.(token)) return true;
+      return reject(request, reply);
     },
   };
 }
