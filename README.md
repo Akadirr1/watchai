@@ -1,233 +1,187 @@
 # QuotaPets
 
-Claude and Codex subscription quota, on your wrist, as a mascot that visibly runs out of
-energy as you run out of quota.
+Your Claude and Codex subscription quota, on your wrist, as a mascot that visibly runs out
+of energy as you run out of quota.
 
-Native iPhone + Apple Watch. SwiftUI, WidgetKit complications, WatchConnectivity.
-No web view, no React Native, no cloud backend.
+Two pieces: a small **server** that reads your quota and publishes it as JSON, and a
+**standalone Apple Watch app** that draws the pets.
 
-> **Status: partially built.** Phases 0-3 and the provider core of 5/6 are done, mascots are
-> drawn and animated, and the shared logic is tested. The Apple targets have **never been
-> compiled** — see [Build status](#build-status) before trusting anything visual.
+```
+Browser ──"Connect Claude"──▶  Server (Docker / Coolify)
+                                 ├─ drives the real claude / codex CLI over stdio-JSON
+                                 ├─ relays the sign-in URL to your browser
+                                 └─ the CLI writes its own credential into /data
+                                        │
+                                   polls 2 usage endpoints every 60s
+                                        │
+                                   JSON API  ── no HTML, no SVG
+                                        │  HTTPS + token
+                                        ▼
+                              Apple Watch (independent watchOS app)
+```
+
+No iPhone app. No Mac. watchOS apps have been able to run independently and reach the
+network on their own since watchOS 6.
 
 ---
 
-## Architecture
+## Why it is built this way
 
-Authentication is the thing that shapes this app, and not in the way the original design
-assumed. The research in [`docs/provider-research.md`](docs/provider-research.md)
-established that **neither provider's login can be legitimately reproduced in an iOS
-app** — so QuotaPets does not try.
+The project kept snagging on one question: **who holds the credential?**
 
-```
-  claude / codex CLIs        ← your own first-party logins, unmodified
-          │ write
-          ▼
-  macOS Keychain · ~/.claude/.credentials.json · ~/.codex/auth.json
-          │ read by
-          ▼
-  QuotaPetsHelper (macOS)    ← the ONLY component that holds a credential
-          │ normalised UsageSnapshot, over LAN
-          ▼
-  QuotaPetsPhone (iOS 18)    ← cache · BGAppRefreshTask · WCSession
-          │ UsageSnapshot only
-          ▼
-  QuotaPetsWatch (watchOS 11) + QuotaPetsWidgets complications
-```
+Native iOS login turned out to be blocked — neither vendor offers public client
+registration, so any native flow would have to send the vendor's own CLI `client_id`, and
+the consent screen would read "Claude Code" while a third-party app took the token. That
+finding is recorded in [`docs/provider-research.md`](docs/provider-research.md) and still
+stands.
 
-**No provider credential ever reaches iOS.** The phone's Keychain duty shrinks to a
-pairing secret — a strictly smaller attack surface than a token-holding design.
+So QuotaPets **implements no OAuth at all**. Sign-in starts the real vendor CLI inside the
+container, relays the URL it prints, and hands back whatever you paste. The consent screen
+is honest, because it really is Claude Code / Codex asking.
 
-| Component | Platform | Role |
-|---|---|---|
-| `QuotaPetsShared` | any | Models, decoders, mascot logic. Foundation-only, **86 tests** |
-| `QuotaPetsHelper` | macOS 14+ | Reads CLI credentials, fetches usage, serves snapshots |
-| `QuotaPetsPhone` | iOS 18+ | Pairing, cache, background refresh, watch sync |
-| `QuotaPetsWatch` | watchOS 11+ | Mascot UI, two provider pages |
-| `QuotaPetsWidgets` | watchOS 11+ | Complications |
+The container keeps its **own** credential in its own config directory. That is what makes
+it safe to refresh tokens here: refresh-token rotation can't strand anyone else's copy. An
+earlier design that mounted the host's `~/.claude` would have broken whatever else on that
+machine was using it.
 
 ---
 
-## Build
+## Running it
 
-The Xcode project is **generated**, not committed. `project.yml` is the source of truth.
+### Coolify
+
+1. New Resource → Application → your repository → **Dockerfile** build pack.
+2. Environment variable: `AUTH_TOKEN` = output of `openssl rand -hex 32`. Turn *off*
+   "Build Variable" so it isn't baked into an image layer.
+3. Domains → your subdomain, Force HTTPS on.
+4. Deploy, then open `https://<your-domain>/setup?t=<AUTH_TOKEN>` and connect each account.
+
+**Optional but recommended:** Persistent Storage → Add, destination `/data`. Without it a
+redeploy starts a fresh container and you sign in again. Nothing else needs a volume.
+
+### Locally
 
 ```bash
-brew install xcodegen
-xcodegen generate
-open QuotaPets.xcodeproj
+npm install
+AUTH_TOKEN=$(openssl rand -hex 32) DATA_DIR=./tmp npm run dev
 ```
 
-Run the shared test suite anywhere with a Swift toolchain — no Mac required:
+### Configuration
 
-```bash
-cd QuotaPetsShared && swift test
-```
-
-### Build status
-
-| Layer | Verified? | How |
+| Variable | Default | |
 |---|---|---|
-| `QuotaPetsShared` logic | ✅ **Yes** | 86 tests, Swift 6.2.1, strict concurrency, passing |
-| `project.yml` → Xcode project | ✅ **Yes** | XcodeGen 2.46 run; targets, deployment targets, bundle IDs and plists inspected |
-| SwiftUI views | ❌ **No** | Requires Xcode |
-| WatchConnectivity, Keychain, WidgetKit | ❌ **No** | Requires Xcode |
-| Install on a physical Series 7 | ❌ **No** | Requires a Mac and a device |
-
-The unverified layers were written on Linux with no Apple toolchain. **Expect compile
-errors on first build** — API misuse that only `xcodebuild` can catch. The shared package
-was deliberately kept Foundation-only so the highest-risk logic (provider parsing, window
-classification, timestamp units) could be tested for real rather than asserted.
+| `AUTH_TOKEN` | — | **Required**, min 32 chars. The process refuses to start without it. |
+| `PORT` | `3000` | |
+| `DATA_DIR` | `/data` | Snapshot cache |
+| `CLAUDE_CONFIG_DIR` | `/data/claude` | Where the Claude CLI keeps its credential |
+| `CODEX_HOME` | `/data/codex` | Where the Codex CLI keeps its credential |
+| `POLL_INTERVAL_SEC` | `60` | |
+| `CODEX_STAGGER_SEC` | `30` | So the two providers never fire in the same instant |
 
 ---
 
-## Provider mechanisms
+## API
 
-Both endpoints are **private and unversioned**. Each is quarantined behind one adapter,
-and every constant lives in `ProviderEndpoints.swift`.
+| Route | Auth | |
+|---|---|---|
+| `GET /healthz` | no | Liveness. Zero I/O, leaks nothing. |
+| `GET /api/usage` | yes | The snapshot the watch fetches |
+| `GET /api/heartbeat` | yes | Freshness, per-provider state, last error |
+| `POST /api/refresh` | yes | Nudges the poll loop; joins an in-flight request |
+| `GET /setup` | yes | Sign-in page — the only HTML served |
 
-**Claude** — `GET https://api.anthropic.com/api/oauth/usage`, headers
-`Authorization: Bearer`, `anthropic-beta: oauth-2025-04-20`, `User-Agent: claude-code/…`.
-Maps `five_hour` → 5-hour and `seven_day` → weekly.
+Auth is one shared token: `Authorization: Bearer <token>` or `X-Auth-Token`. `/setup` also
+accepts `?t=<token>` once, swaps it for a cookie and strips it from the URL.
 
-**Codex** — `GET https://chatgpt.com/backend-api/wham/usage`, headers
-`Authorization: Bearer`, `User-Agent: codex-cli`, `OpenAI-Beta: codex-1`,
-`originator: Codex Desktop`, plus `ChatGPT-Account-Id` when present.
-
-### Four traps, each pinned by a test
-
-1. **Claude sends `utilization`, not `used_percent`.** The original spec assumed the
-   latter. Decoding only that name yields *no Claude data at all*. Precedence is
-   `utilization` → `used_percentage`.
-2. **Claude reset timestamps are seconds *or* milliseconds**, disambiguated by a `> 1e10`
-   magnitude test with a strict greater-than, so exactly `1e10` means seconds.
-3. **Codex `reset_at` is unconditionally Unix seconds.** Applying Claude's heuristic here
-   mis-scales anything above `1e10`. The two decoders are separate on purpose.
-4. **Codex windows classify by duration, not position.** `primary_window` is *not*
-   guaranteed to be the 5-hour one. Positional fallback applies only when a duration is
-   unrecognised — never to a window that positively classified as the other kind.
-
-### When a provider changes shape
-
-Symptom: `PROVIDER ERROR` on the watch, `providerResponseChanged` in Diagnostics.
-Both mappers reject payloads that decode but carry nothing recognisable, rather than
-silently showing zeros. Fix in `ClaudeUsagePayload` / `CodexUsagePayload` and add a
-fixture test — the suite is built to make that a five-minute change.
+**`/healthz` deliberately says nothing about provider health.** If it did, an Anthropic
+outage would mark the container unhealthy and Coolify would restart it in a loop while the
+app was working perfectly.
 
 ---
 
-## Refresh behaviour, honestly stated
+## The four traps
 
-**Foreground:** both providers every 60s, staggered by 30s so they never fire together.
+Both usage endpoints are private and unversioned. These are the non-obvious rules, each
+pinned by a test:
 
-**Background:** best-effort only. `BGAppRefreshTask` has **no guaranteed interval** —
-Apple documents `earliestBeginDate` as a floor and disclaims any launch promise. A 60s
-background cadence is not achievable and the app does not pretend otherwise; every
-surface showing a number also shows its freshness (`UPDATED 42s AGO` / `STALE · 8m`).
-
-**Two Apple constraints that shaped the design:**
-
-- **The phone cannot wake the watch.** Apple states `sendMessage` from iOS "does not wake
-  up the corresponding WatchKit extension." Only watch→phone wakes the counterpart, so
-  the watch pulls and the phone stages data via `updateApplicationContext`.
-- **Complications get 75 timeline reloads/day** — about one per 19 minutes. The
-  countdown stays alive between reloads via `Text(_:style:.timer)`, which advances on
-  screen with no code running, no budget spend, and keeps updating during Always-On.
-  That is the entire "living complication" mechanism; there is no other way to do it.
-
----
-
-## Mascots
-
-The mascots are **drawn in code**, not shipped as images. Each pet is built from the
-*form* its provider is recognisable by, redrawn as an original character rather than
-copying a brand asset:
-
-- **Claude** → a radiating spark. Its arms are the gauge.
-- **Codex** → a terminal window. Its cursor is the pulse.
-
-The point of that choice: in both cases the form **is** the expression mechanism, so
-nothing has to be bolted on to show mood. As quota drains, Claude's crown wilts — the top
-arms collapse the way a spent flower does, while the arms already pointing down keep
-holding it up. Codex's cursor blink slows from 0.45s to 3s and its phosphor glow fades
-until the screen goes dark.
-
-No third-party artwork is copied or redistributed. Anthropic's and OpenAI's marks are
-trademarks; neither ships a mascot character, and Apache-2.0 (which covers `openai/codex`)
-explicitly grants no trademark rights.
-
-Live preview, no Xcode required:
-**[Mascot Lab](https://claude.ai/code/artifact/adddbd0a-104f-41c2-bf1f-4838e92ec152)** —
-drag the quota sliders and watch both pets react.
-
-`PetPose` in `Apps/QuotaPetsWatch/Mascots/PetShapes.swift` is a per-state value table, so
-tuning a mood means editing numbers, not redrawing.
-
-### Supplying your own art (optional)
-
-If you'd rather use your own images, drop them into the watch target's asset catalog and
-they take precedence automatically — no code change:
-
-```
-claudeMascot-hyper   claudeMascot-happy   claudeMascot-normal
-claudeMascot-tired   claudeMascot-exhausted   claudeMascot-empty
-codexMascot-<the same six>
-```
-
-`claudeMascot` / `codexMascot` act as fallbacks. Note that supplied images are static —
-the drawn pets are the animated path.
-
-### Energy states
-
-`pressure = min(fiveHourRemaining, weeklyRemaining)` — the *tighter* window drives the
-mascot, and the UI marks which one, so a tired pet is explainable.
-
-| Remaining | State |
+| | |
 |---|---|
-| 75–100 | hyper |
-| 50–75 | happy |
-| 30–50 | normal |
-| 15–30 | tired |
-| 0–15 | exhausted |
-| 0 | empty |
+| **Claude sends `utilization`**, falling back to `used_percentage` | It never sends `used_percent`. Decoding only that name yields *no Claude data at all* |
+| **Claude reset timestamps** are seconds *or* milliseconds, split at `> 1e10` | Strictly greater-than, so exactly `1e10` means seconds |
+| **Codex `reset_at`** is unconditionally Unix seconds | Applying Claude's rule mis-scales anything above `1e10`. Two separate decoders on purpose |
+| **Codex classifies windows by duration, not position** | `primary_window` is *not* guaranteed to be the 5-hour one. The positional fallback applies only to an unrecognised duration |
+
+Plus: non-finite input clamps to 0 (a naive `min/max` would render `nan%`), a missing
+window is not 0% remaining, and a missing `plan_type` means the schema moved.
+
+### "Never runs prompts" — enforced, not promised
+
+Two tests make it mechanical rather than a claim in a README: the set of hostnames
+reachable from `src/` must equal the documented inventory, and no source file may mention
+an inference endpoint. A third asserts no 8-character slice of the auth token appears in
+any response body.
+
+Every external host QuotaPets can reach: `api.anthropic.com`, `chatgpt.com` (usage) and
+`platform.claude.com`, `auth.openai.com` (token refresh of our own grant).
 
 ---
 
-## Security
+## The watch app
 
-- Provider credentials live **only on the Mac**, read from what the CLIs wrote.
-- Nothing credential-shaped is logged, committed, or placed in a QR code. A test asserts
-  the pairing payload contains no token-shaped field.
-- Pairing nonces are 24 random bytes, expiring and single-use.
-- No analytics, no telemetry, no third-party SDK, no cloud backend.
-- On iOS, Keychain items must use `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` —
-  the silent default (`WhenUnlocked`) **fails inside background tasks on a locked
-  device**.
+```bash
+cp Secrets.xcconfig.example Secrets.xcconfig   # fill in your URL and AUTH_TOKEN
+brew install xcodegen && xcodegen generate && open QuotaPets.xcodeproj
+```
 
-**Every external hostname QuotaPets can reach:** `api.anthropic.com`, `chatgpt.com`.
-Both are in `ProviderEndpoints.swift`, and nowhere else.
+`Secrets.xcconfig` is gitignored.
+
+**Mascots are drawn in code**, not shipped as images — Claude is a radiating spark whose
+arms are the gauge, Codex a terminal window whose cursor is the pulse. In both cases the
+form *is* the expression mechanism, so nothing is bolted on to show mood. As quota drains,
+Claude's crown wilts (the top arms collapse while the lower ones hold it up) and Codex's
+cursor slows from 0.45s to 3s while its glow fades to nothing.
+
+Pressure comes from the *tighter* window — `min(fiveHour, weekly)` — and the UI marks which
+one, so a tired pet is explainable.
+
+Two Apple constraints shaped this and are worth knowing before changing it:
+
+- **Complications get 75 timeline reloads a day**, about one per 19 minutes. The timeline
+  carries a single entry; the countdown stays alive through `Text(style:.timer)`, which
+  advances with no code running and no budget spent. There is no alternative mechanism.
+- **A WidgetKit complication is a one-way door.** Once shipped, the system permanently
+  stops calling ClockKit timeline APIs.
+
+⚠️ A free Apple ID expires provisioning every 7 days, so the watch app dies weekly until
+rebuilt. For something you actually want on your wrist the $99/yr program is effectively
+required. App Groups — used to share the snapshot with the widget — *do* work on a free
+Personal Team.
 
 ---
 
-## Installing on a physical Watch
+## Testing
 
-watchOS 11 supports Series 6 and later, so a Series 7 on 11.6.2 is in range.
+```bash
+npm test                              # server: 94 tests
+cd QuotaPetsShared && swift test      # watch core: 26 tests, runs on Linux too
+```
 
-⚠️ **A free Apple ID expires provisioning every 7 days** — profiles, App IDs and device
-registrations all lapse, and the watch app and complication die weekly until you rebuild
-with both devices present. For something you actually want on your wrist, the $99/yr
-Apple Developer Program is effectively required.
-
-App Groups (used to share snapshots with the widget extension) **do** work on a free
-Personal Team — verified against Apple's capability reference.
+The Swift package is Foundation-only on purpose: it builds and tests without a Mac, so the
+mascot and presentation logic stays verifiable. SwiftUI, WidgetKit and the Xcode project
+still require macOS and have **not** been compiled — expect to fix compile errors on the
+first build.
 
 ---
 
-## What is not built
+## Known limitations
 
-Phases 4 and 7–9: the LAN transport between helper and phone, the QR pairing UI, mascot
-animation polish, and threshold haptics beyond the shared logic. Mock providers currently
-stand in on the phone so the UI is exercisable end to end.
+- The Claude programmatic login uses SDK control-protocol subtypes marked `@internal` in
+  the vendor SDK. They work and are what first-party clients use, but carry no stability
+  guarantee. If a release breaks them, the fallback is a one-off
+  `docker exec <container> claude auth login` — the credential lands in the same place.
+- Image is ~700 MB because both vendor CLIs ship large native binaries. They are only
+  needed for sign-in; this was a deliberate trade for a one-step setup.
+- Alpine is the base because Codex publishes **only** musl Linux artifacts.
 
 ---
 
