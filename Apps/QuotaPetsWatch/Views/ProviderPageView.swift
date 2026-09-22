@@ -9,7 +9,8 @@ struct ProviderPageView: View {
     let provider: AIProvider
     let usage: ProviderUsage?
     let freshness: SnapshotFreshness?
-    let error: ProviderError?
+    /// Compact label such as AUTH / OFFLINE, already reduced for a small screen.
+    let error: String?
     let isAnimating: Bool
     let now: Date
 
@@ -27,7 +28,7 @@ struct ProviderPageView: View {
                 .frame(height: 74)
 
             if let error {
-                Text(error.watchLabel)
+                Text(error)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.orange)
             } else if let usage {

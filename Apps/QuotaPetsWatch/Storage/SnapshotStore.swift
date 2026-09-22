@@ -13,10 +13,15 @@ public final class SnapshotStore: ObservableObject {
 
     private let url: URL
 
+    /// The watch app and the widget extension are separate processes, so the snapshot
+    /// lives in the shared App Group container rather than either one's own sandbox.
+    /// App Groups are available on a free Personal Team — Apple's watchOS capability
+    /// reference states the watch target's capabilities "don't depend on your program
+    /// membership".
     public init(filename: String = "snapshot.json") {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        self.url = dir.appendingPathComponent(filename)
+        let directory = SharedContainer.directory()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        self.url = directory.appendingPathComponent(filename)
         load()
     }
 
