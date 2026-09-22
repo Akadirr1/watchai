@@ -192,8 +192,10 @@ final class PairingModel: ObservableObject {
         switch error as? PairingClient.Failure {
         case .offline: "CAN'T REACH SERVER"
         case .server(let status) where status == 429: "TOO MANY TRIES"
-        case .server: "SERVER ERROR"
-        case .malformed, .none: "SERVER ERROR"
+        case .server(let status): "SERVER ERROR \(status)"
+        // Reached the server, could not read the reply — a different problem, and worth
+        // saying so: this exact case was misread as a server fault for an entire session.
+        case .malformed, .none: "BAD RESPONSE"
         }
     }
 }

@@ -9,7 +9,7 @@ import { SnapshotStore } from "../src/poll/snapshotStore.js";
 import { Poller } from "../src/poll/poller.js";
 import { LoginManager } from "../src/login/manager.js";
 import { PairingStore, PAIRING_TTL_MS } from "../src/pair/index.js";
-import { pairingURL, renderPairingQR } from "../src/pair/qr.js";
+import { pairingURL, renderPairingQR, publicOrigin } from "../src/pair/qr.js";
 import { readFile } from "node:fs/promises";
 
 const NOW = 1_757_000_000_000;
@@ -270,5 +270,41 @@ describe("the device file", () => {
 
     const onDisk = JSON.parse(await readFile(join(dir, "devices.json"), "utf8"));
     expect(onDisk).toHaveLength(codes.length);
+  });
+});
+
+describe("the origin embedded in the QR", () => {
+  const request = { protocol: "https", hostname: "derived.example.com" } as never;
+  const original = process.env["PUBLIC_URL"];
+  afterAll(() => {
+    if (original === undefined) delete process.env["PUBLIC_URL"];
+    else process.env["PUBLIC_URL"] = original;
+  });
+
+  it("falls back to the request when PUBLIC_URL is unset", () => {
+    delete process.env["PUBLIC_URL"];
+    expect(publicOrigin(request)).toBe("https://derived.example.com");
+  });
+
+  it("uses PUBLIC_URL when it carries a scheme", () => {
+    process.env["PUBLIC_URL"] = "https://pets.example.com";
+    expect(publicOrigin(request)).toBe("https://pets.example.com");
+  });
+
+  // Found in production: PUBLIC_URL was set to a bare host, so the QR encoded
+  // "pets.example.com/pair?c=..." — a string no camera can open.
+  it("assumes https for a bare host rather than emitting an unusable origin", () => {
+    process.env["PUBLIC_URL"] = "pets.example.com";
+    expect(publicOrigin(request)).toBe("https://pets.example.com");
+  });
+
+  it("tolerates trailing slashes and surrounding whitespace", () => {
+    process.env["PUBLIC_URL"] = "  https://pets.example.com//  ";
+    expect(publicOrigin(request)).toBe("https://pets.example.com");
+  });
+
+  it("leaves plain http alone — a local deployment is not https", () => {
+    process.env["PUBLIC_URL"] = "http://192.168.1.10:3000";
+    expect(publicOrigin(request)).toBe("http://192.168.1.10:3000");
   });
 });

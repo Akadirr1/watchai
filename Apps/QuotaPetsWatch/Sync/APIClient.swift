@@ -55,10 +55,10 @@ public struct APIClient: Sendable {
             throw Failure.server(status: http.statusCode)
         }
 
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        // NOT `.iso8601`: that strategy cannot read the server's timestamps at all.
+        // See ISO8601Decoding.swift.
         do {
-            return try decoder.decode(APIUsageResponse.self, from: data).toSnapshot()
+            return try JSONDecoder.quotaPets().decode(APIUsageResponse.self, from: data).toSnapshot()
         } catch {
             throw Failure.malformed
         }
