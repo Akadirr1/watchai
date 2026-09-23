@@ -122,8 +122,14 @@ extension APIClient.Failure {
         switch self {
         case .unauthorized: "AUTH"
         case .offline: "OFFLINE"
-        case .malformed: "SERVER ERROR"
-        case .server: "SERVER ERROR"
+        // Distinct from .server on purpose: one means the server said no, the other means
+        // we could not read what it said. Collapsing them hid a client-side decode bug
+        // behind a label that pointed at the server.
+        case .malformed: "BAD RESPONSE"
+        // The status, not the word "SERVER ERROR": this line is the only thing the watch
+        // can tell you, so it should say which failure it was. Kept short because it
+        // shares a 41mm screen with the mascot, both windows and a countdown.
+        case .server(let status): "HTTP \(status)"
         }
     }
 }

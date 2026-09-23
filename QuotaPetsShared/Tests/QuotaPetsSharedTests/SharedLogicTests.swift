@@ -267,3 +267,56 @@ struct SnapshotTests {
 
 
 }
+
+// MARK: - Timestamp decoding
+
+/// The bug that made a healthy server look broken.
+///
+/// The watch showed "SERVER ERROR" on every request while `/api/pair/start` was answering
+/// 200 with a valid body. The cause was entirely client-side: the stock `.iso8601` date
+/// strategy cannot read the timestamps the server emits, so decoding threw and the error
+/// was flattened into a generic label.
+@Suite("Timestamp decoding")
+struct ISO8601DecodingTests {
+    private struct Wrapper: Decodable { let at: Date }
+
+    /// Exactly what the Node server sends: `toISOString()` always includes milliseconds.
+    private static let withMilliseconds = #"{"at":"2026-09-22T20:13:00.250Z"}"#
+    private static let withoutMilliseconds = #"{"at":"2026-09-22T20:13:00Z"}"#
+
+    private func decode(_ json: String, with decoder: JSONDecoder) throws -> Date {
+        try decoder.decode(Wrapper.self, from: Data(json.utf8)).at
+    }
+
+    /// Pins the trap itself. `.iso8601` uses `ISO8601DateFormatter` with only
+    /// `.withInternetDateTime`, which has no fractional-seconds support — so this is not a
+    /// server bug to go chasing.
+    @Test("the stock .iso8601 strategy rejects the server's own output")
+    func stockStrategyRejectsFractionalSeconds() {
+        let stock = JSONDecoder()
+        stock.dateDecodingStrategy = .iso8601
+        #expect(throws: (any Error).self) {
+            try decode(Self.withMilliseconds, with: stock)
+        }
+    }
+
+    @Test("ours reads milliseconds")
+    func readsFractionalSeconds() throws {
+        let date = try decode(Self.withMilliseconds, with: .quotaPets())
+        #expect(date.timeIntervalSince1970 == 1_790_107_980.25)
+    }
+
+    // A different serialiser on the other end must not break the app either.
+    @Test("ours still reads plain seconds")
+    func readsWholeSeconds() throws {
+        let date = try decode(Self.withoutMilliseconds, with: .quotaPets())
+        #expect(date.timeIntervalSince1970 == 1_790_107_980)
+    }
+
+    @Test("ours rejects what is genuinely not a timestamp")
+    func rejectsGarbage() {
+        #expect(throws: (any Error).self) {
+            try decode(#"{"at":"tomorrow-ish"}"#, with: .quotaPets())
+        }
+    }
+}

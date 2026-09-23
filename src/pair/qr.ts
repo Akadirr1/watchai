@@ -19,8 +19,14 @@ import type { FastifyRequest } from "fastify";
  * proxy headers is only as trustworthy as the proxy in front of you.
  */
 export function publicOrigin(request: FastifyRequest): string {
-  const configured = process.env["PUBLIC_URL"];
-  if (configured) return configured.replace(/\/+$/, "");
+  const configured = process.env["PUBLIC_URL"]?.trim();
+  if (configured) {
+    const trimmed = configured.replace(/\/+$/, "");
+    // Setting PUBLIC_URL to a bare host ("pets.example.com") is the obvious thing to do
+    // and used to be taken verbatim, which put a scheme-less string in the QR — nothing a
+    // camera can open. Assume https rather than emit something unusable.
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  }
   return `${request.protocol}://${request.hostname}`;
 }
 
