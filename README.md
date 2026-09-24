@@ -245,6 +245,21 @@ rebuilt. For something you actually want on your wrist the $99/yr program is eff
 required. App Groups — used to share the snapshot with the widget — *do* work on a free
 Personal Team.
 
+### On the watch face
+
+watchOS lets no third-party app ship a watch face, and a complication is a static snapshot —
+it cannot animate. So the pet reaches the face two ways:
+
+- **Complications.** *QuotaPets* fits all four families; the circular and corner ones
+  name the window their number is from. *Claude Pet* is rectangular: Claude drawn at its
+  current energy, the tighter window, and a live reset countdown. It needs a face with a
+  rectangular slot — Modular, Modular Duo, Modular Ultra, Infograph Modular — or the
+  Smart Stack.
+- **The live pet** is the app's first page: a clock, Claude breathing and blinking, and a
+  tap (or Double Tap on Series 9 / Ultra 2) makes it hop — higher the more quota is left.
+  Settings › General › Return to Clock › QuotaPets › Custom › **After 1 hour** keeps it on
+  your wrist the way a face would; Always-On keeps it visible, dimmed and still.
+
 ---
 
 ## Testing

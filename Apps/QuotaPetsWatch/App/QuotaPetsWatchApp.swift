@@ -198,8 +198,15 @@ private struct UsageTabs: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
+    /// Animation stops when the scene is inactive OR the display is dimmed for
+    /// Always-On (§16, §20).
+    private var isAnimating: Bool { scenePhase == .active && !isLuminanceReduced }
+
     var body: some View {
         TabView {
+            FaceView(usage: model.store.snapshot?.claude,
+                     generatedAt: model.store.snapshot?.generatedAt,
+                     isAnimating: isAnimating)
             ForEach(AIProvider.allCases, id: \.self) { provider in
                 ProviderPageView(
                     provider: provider,
@@ -208,9 +215,7 @@ private struct UsageTabs: View {
                         SnapshotFreshness.evaluate(generatedAt: $0.generatedAt, now: model.now)
                     },
                     error: model.lastError?.watchLabel,
-                    // Animation stops when the scene is inactive OR the display is
-                    // dimmed for Always-On (§16, §20).
-                    isAnimating: scenePhase == .active && !isLuminanceReduced,
+                    isAnimating: isAnimating,
                     now: model.now
                 )
             }

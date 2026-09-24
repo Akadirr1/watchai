@@ -135,7 +135,77 @@ struct QuotaComplicationView: View {
     }
 }
 
+/// Claude, drawn, on the watch face — the biggest surface watchOS gives a third-party
+/// app: a rectangular slot on Modular, Modular Duo, Modular Ultra, Infograph Modular or
+/// the Smart Stack.
+///
+/// A complication cannot animate, so the pet holds the pose for its current energy and
+/// the countdown is what moves. `Text(timerInterval:)` rather than `.timer`: it stops at
+/// zero instead of counting back up past a reset the snapshot has not caught up with.
+struct ClaudePetView: View {
+    let entry: QuotaEntry
+
+    var body: some View {
+        let usage = entry.snapshot?.claude
+        let pressure = MascotStateResolver.resolve(usage)
+        HStack(spacing: 6) {
+            ClaudeSparkPet(pose: .pose(for: pressure?.state ?? .normal),
+                           isAnimating: false, blinkClosed: false, breathing: false)
+                .aspectRatio(1, contentMode: .fit)
+                .widgetAccentable()
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text("CLAUDE")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text(tightest(pressure))
+                        .font(.system(size: 22, weight: .semibold, design: .rounded))
+                    if let kind = pressure?.constrainingWindow {
+                        Text(kind.shortLabel)
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                }
+                if let kind = pressure?.constrainingWindow,
+                   let reset = usage?.window(kind)?.resetAt, reset > entry.date {
+                    // A weekly reset days away reads better as a day than as 100+ hours.
+                    Group {
+                        if reset.timeIntervalSince(entry.date) < 86_400 {
+                            Text(timerInterval: entry.date...reset, countsDown: true)
+                        } else {
+                            Text(reset, format: .dateTime.weekday(.abbreviated).hour().minute())
+                        }
+                    }
+                    .font(.system(size: 11, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .containerBackground(for: .widget) { Color.clear }
+    }
+}
+
 @main
+struct QuotaPetsWidgetBundle: WidgetBundle {
+    var body: some Widget {
+        QuotaPetsWidgets()
+        ClaudePetWidget()
+    }
+}
+
+struct ClaudePetWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "com.quotapets.pet", provider: QuotaProvider()) { entry in
+            ClaudePetView(entry: entry)
+        }
+        .configurationDisplayName("Claude Pet")
+        .description("Claude at its current energy, with the reset countdown.")
+        .supportedFamilies([.accessoryRectangular])
+    }
+}
+
 struct QuotaPetsWidgets: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "com.quotapets.complication", provider: QuotaProvider()) { entry in
