@@ -2,8 +2,8 @@ import WidgetKit
 import SwiftUI
 import QuotaPetsShared
 
-/// Reads what the watch app wrote. Never fetches — the widget has no network budget to
-/// spend, and the app is the only thing that talks to the server.
+/// Reads what the watch app wrote. Never fetches: the app is the only thing that talks to
+/// the server, and it reloads these timelines every time it writes a new snapshot.
 func loadSharedSnapshot() -> UsageSnapshot? {
     guard let data = try? Data(contentsOf: SharedContainer.snapshotURL()) else { return nil }
     struct Persisted: Decodable { let snapshot: UsageSnapshot? }
@@ -18,11 +18,12 @@ struct QuotaEntry: TimelineEntry {
 /// Timeline provider.
 ///
 /// The budget is the binding constraint: watchOS allows **75 reloads per day**, about
-/// one per 19 minutes at best. So this deliberately emits a SHORT timeline and does not
-/// try to encode changing usage into future entries — the numbers only change when the
-/// phone delivers a new snapshot.
+/// one per 19 minutes at best. The numbers only change when the app writes a new
+/// snapshot, and the app reloads this timeline when it does (`SnapshotStore.persist`).
+/// So the timeline never schedules a reload of its own: a timed policy would spend that
+/// same budget re-reading a file nothing has rewritten.
 ///
-/// What keeps the complication alive between reloads is `Text(_:style:.timer)`, which
+/// What keeps the complication alive between reloads is `Text(timerInterval:)`, which
 /// advances on screen with no code running and no budget spend, and which Apple confirms
 /// keeps updating during Always-On (research §5). That is the entire §11 mechanism.
 struct QuotaProvider: TimelineProvider {
@@ -35,11 +36,8 @@ struct QuotaProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<QuotaEntry>) -> Void) {
-        let now = Date()
-        let entry = QuotaEntry(date: now, snapshot: loadSharedSnapshot())
-        // One entry, refreshed on the system's own schedule. Asking for more would spend
-        // budget to display values that cannot have changed.
-        completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(20 * 60))))
+        let entry = QuotaEntry(date: Date(), snapshot: loadSharedSnapshot())
+        completion(Timeline(entries: [entry], policy: .never))
     }
 }
 
@@ -57,6 +55,11 @@ private func mascotSymbol(_ state: MascotEnergyState) -> String {
 
 private func remaining(_ usage: ProviderUsage?, _ kind: UsageWindowKind) -> String {
     usage?.window(kind).map { "\(Int($0.remainingPercent.rounded()))" } ?? "--"
+}
+
+/// The tighter window's remaining — the same number the pet's mood is drawn from.
+private func tightest(_ pressure: MascotPressure?) -> String {
+    pressure.map { "\(Int($0.remainingPercent.rounded()))%" } ?? "--"
 }
 
 struct QuotaComplicationView: View {
@@ -94,27 +97,40 @@ struct QuotaComplicationView: View {
         .containerBackground(for: .widget) { Color.clear }
     }
 
-    /// Tightest remaining across both windows of the selected provider (§18).
+    /// Tightest remaining across both windows of the selected provider (§18), and which
+    /// window that is. Unlabelled, a weekly number moves so slowly it reads as frozen.
     private var circular: some View {
         let pressure = MascotStateResolver.resolve(claude)
         return VStack(spacing: 0) {
             Image(systemName: mascotSymbol(pressure?.state ?? .normal))
-                .font(.system(size: 12))
-            Text(pressure.map { "\(Int($0.remainingPercent.rounded()))%" } ?? "--")
+                .font(.system(size: 10))
+            Text(tightest(pressure))
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
+            if let kind = pressure?.constrainingWindow {
+                Text(kind.shortLabel)
+                    .font(.system(size: 8, weight: .medium))
+            }
         }
         .containerBackground(for: .widget) { Color.clear }
     }
 
     private var corner: some View {
-        Text(MascotStateResolver.resolve(claude).map { "\(Int($0.remainingPercent.rounded()))%" } ?? "--")
+        let pressure = MascotStateResolver.resolve(claude)
+        return Text(tightest(pressure))
             .font(.system(size: 14, weight: .semibold, design: .rounded))
+            // Curves along the bezel: which provider, and which window the number is.
+            .widgetLabel {
+                Text(pressure?.constrainingWindow.map { "CLAUDE \($0.shortLabel)" } ?? "CLAUDE")
+            }
             .containerBackground(for: .widget) { Color.clear }
     }
 
-    /// `C 36% · X 53%` — kept minimal so the family is not overcrowded (§18).
+    /// `C 36% · X 53%` — each provider's tighter window, as on its pet (§18). It used to
+    /// be Claude's 5-hour beside Codex's weekly, two numbers that meant different things.
     private var inline: some View {
-        Text("C \(remaining(claude, .fiveHour))% · X \(remaining(codex, .weekly))%")
+        let c = tightest(MascotStateResolver.resolve(claude))
+        let x = tightest(MascotStateResolver.resolve(codex))
+        return Text("C \(c) · X \(x)")
             .containerBackground(for: .widget) { Color.clear }
     }
 }

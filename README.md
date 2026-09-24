@@ -232,9 +232,11 @@ one, so a tired pet is explainable.
 
 Two Apple constraints shaped this and are worth knowing before changing it:
 
-- **Complications get 75 timeline reloads a day**, about one per 19 minutes. The timeline
-  carries a single entry; the countdown stays alive through `Text(style:.timer)`, which
-  advances with no code running and no budget spent. There is no alternative mechanism.
+- **Complications get 75 timeline reloads a day**, about one per 19 minutes, and only
+  redraw when told to. The app reloads them on every new snapshot, and while it is closed
+  it wakes itself every 20 minutes (background app refresh) to fetch one — three wakes an
+  hour, 72 reloads a day. The timeline carries a single entry; the countdown stays alive
+  through `Text(timerInterval:)`, which advances with no code running and no budget spent.
 - **A WidgetKit complication is a one-way door.** Once shipped, the system permanently
   stops calling ClockKit timeline APIs.
 
