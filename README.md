@@ -221,20 +221,29 @@ brew install xcodegen && xcodegen generate && open QuotaPets.xcodeproj
 `QUOTAPETS_API_URL` only; the token arrives by QR pairing, so no credential is ever
 compiled into the bundle and rotating `AUTH_TOKEN` never means rebuilding the app.
 
-**Mascots are drawn in code**, not shipped as images — Claude is a radiating spark whose
-arms are the gauge, Codex a terminal window whose cursor is the pulse. In both cases the
-form *is* the expression mechanism, so nothing is bolted on to show mood. As quota drains,
-Claude's crown wilts (the top arms collapse while the lower ones hold it up) and Codex's
-cursor slows from 0.45s to 3s while its glow fades to nothing.
+Run `xcodegen generate` again after every pull that adds a file or touches `project.yml`.
+A stale project does not warn; it fails with names it cannot find, such as
+`Cannot find 'FaceView' in scope`.
+
+**Mascots are drawn in code**, not shipped as images. Claude is the pixel critter from
+[Akadirr1/mascot](https://github.com/Akadirr1/mascot), its poses and GSAP timings ported
+to Swift: it looks around, jumps and idles while nothing is happening; walks, tightens its
+bandana and lifts weights while usage is climbing; waves a flag and celebrates under 15%
+left; and sweats once the quota is gone. The bandana is on by default and toggles on the
+last page. Codex is a terminal window whose cursor is the pulse, slowing from 0.45s to 3s
+while its glow fades to nothing.
 
 Pressure comes from the *tighter* window — `min(fiveHour, weekly)` — and the UI marks which
-one, so a tired pet is explainable.
+one, so a tired pet is explainable. Claude's pixel mascot is the exception: its mood reads
+the weekly window alone.
 
 Two Apple constraints shaped this and are worth knowing before changing it:
 
-- **Complications get 75 timeline reloads a day**, about one per 19 minutes. The timeline
-  carries a single entry; the countdown stays alive through `Text(style:.timer)`, which
-  advances with no code running and no budget spent. There is no alternative mechanism.
+- **Complications get 75 timeline reloads a day**, about one per 19 minutes, and only
+  redraw when told to. The app reloads them on every new snapshot, and while it is closed
+  it wakes itself every 20 minutes (background app refresh) to fetch one — three wakes an
+  hour, 72 reloads a day. The timeline carries a single entry; the countdown stays alive
+  through `Text(timerInterval:)`, which advances with no code running and no budget spent.
 - **A WidgetKit complication is a one-way door.** Once shipped, the system permanently
   stops calling ClockKit timeline APIs.
 
@@ -242,6 +251,23 @@ Two Apple constraints shaped this and are worth knowing before changing it:
 rebuilt. For something you actually want on your wrist the $99/yr program is effectively
 required. App Groups — used to share the snapshot with the widget — *do* work on a free
 Personal Team.
+
+### On the watch face
+
+watchOS has no API for third-party watch faces — still none in watchOS 27. Every "custom
+face" app on the App Store is one of two things: an image or Live Photo on Apple's Photos
+face (Facer, the "live" face galleries), or an app that draws a clock and stays in front
+(Clockology). QuotaPets does the second, plus complications:
+
+- **Complications.** Four for corner and circular slots — *Claude 5H*, *Claude WEEK*,
+  *Codex 5H*, *Codex WEEK* — so each slot holds the one number you picked for it.
+  *QuotaPets* shows both providers in a rectangular or inline slot.
+- **The live pet** is the app's first page: date, clock, the pixel Claude playing its
+  clips, and a tap (or Double Tap on Series 9 / Ultra 2) makes it hop — higher the more
+  weekly quota is left. The system's corner clock is hidden there, so it reads as a face,
+  not an app. Settings › General › Return to Clock › QuotaPets › Custom › **After 1 hour**
+  keeps it on your wrist the way a face would; Always-On keeps it visible, dimmed and
+  still.
 
 ---
 

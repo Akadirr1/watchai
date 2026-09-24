@@ -35,6 +35,10 @@ settings:
     # account-specific state.
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
+    # The build number both targets carry. Bump it whenever the widget list changes:
+    # watchOS can keep offering the old complications after a same-version reinstall,
+    # and app and extension must always agree on it.
+    CURRENT_PROJECT_VERSION: "3"
 
 packages:
   QuotaPetsShared:
@@ -67,7 +71,11 @@ targets:
       path: Apps/QuotaPetsWatch/Info.plist
       properties:
         CFBundleDisplayName: QuotaPets
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         WKApplication: true
+        # There is no iPhone app. Without this the watch refuses to install the build,
+        # asking for a WKCompanionAppBundleIdentifier that has nothing to name.
+        WKWatchOnly: true
         # Always-On is wanted: the mascot and countdown are designed to stay legible
         # while dimmed.
         WKSupportsAlwaysOnDisplay: true
@@ -98,6 +106,7 @@ targets:
       path: Apps/QuotaPetsWidgets/Info.plist
       properties:
         CFBundleDisplayName: QuotaPets
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
 

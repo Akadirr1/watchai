@@ -38,7 +38,9 @@ public struct APIClient: Sendable {
 
     public func fetchSnapshot() async throws -> UsageSnapshot {
         var request = URLRequest(url: baseURL.appendingPathComponent("api/usage"))
-        request.timeoutInterval = 15
+        // Under the 15 s a background refresh gets in total: a wake that outlives it is
+        // killed, not merely failed.
+        request.timeoutInterval = 10
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         let data: Data

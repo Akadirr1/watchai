@@ -11,6 +11,11 @@ struct QuotaPetsWatchApp: App {
         WindowGroup {
             WatchRootView().environmentObject(model)
         }
+        // Holds the model itself, read here while `body` runs, rather than reaching back
+        // through the @StateObject wrapper from a background wake.
+        .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) { [model] in
+            await model.backgroundRefresh()
+        }
     }
 }
 
@@ -53,6 +58,16 @@ final class WatchModel: ObservableObject {
     func becameInactive() {
         ticker?.invalidate()
         ticker = nil
+        // Off screen, the app is still the complication's only source of new numbers.
+        if client != nil { BackgroundRefresh.schedule() }
+    }
+
+    /// The `.appRefresh` wake: one fetch — which persists and so reloads the
+    /// complication — then book the next.
+    func backgroundRefresh() async {
+        guard client != nil else { return }
+        await fetch(announcing: false)
+        BackgroundRefresh.schedule()
     }
 
     /// Called by the pairing screen once a device token has reached the Keychain.
@@ -68,8 +83,8 @@ final class WatchModel: ObservableObject {
     /// credential the server has already rejected.
     private func unpair() {
         DeviceTokenStore.clear()
-        becameInactive()
         client = nil
+        becameInactive()
         isPaired = false
     }
 
@@ -88,24 +103,28 @@ final class WatchModel: ObservableObject {
     }
 
     func refresh() {
+        Task { await fetch(announcing: true) }
+    }
+
+    /// The one fetch, for the foreground ticker and the background wake alike. No haptic
+    /// from the background: it would land on a wrist that is not looking.
+    private func fetch(announcing: Bool) async {
         guard let client, !inFlight else { return }
         inFlight = true
-        Task { @MainActor in
-            defer { inFlight = false }
-            do {
-                let snapshot = try await client.fetchSnapshot()
-                let events = store.apply(snapshot)
-                lastError = nil
-                if !events.isEmpty { WatchModel.playHaptics(for: events) }
-            } catch APIClient.Failure.unauthorized {
-                unpair()
-            } catch let failure as APIClient.Failure {
-                // A failed fetch is not an error state on screen: the cached snapshot
-                // stays with its own freshness label. Only the reason is recorded.
-                lastError = failure
-            } catch {
-                lastError = .offline
-            }
+        defer { inFlight = false }
+        do {
+            let snapshot = try await client.fetchSnapshot()
+            let events = store.apply(snapshot)
+            lastError = nil
+            if announcing, !events.isEmpty { WatchModel.playHaptics(for: events) }
+        } catch APIClient.Failure.unauthorized {
+            unpair()
+        } catch let failure as APIClient.Failure {
+            // A failed fetch is not an error state on screen: the cached snapshot
+            // stays with its own freshness label. Only the reason is recorded.
+            lastError = failure
+        } catch {
+            lastError = .offline
         }
     }
 
@@ -113,6 +132,32 @@ final class WatchModel: ObservableObject {
     private static func playHaptics(for events: [QuotaEvent]) {
         guard let strongest = events.max(by: { !$0.isMajor && $1.isMajor }) else { return }
         WKInterfaceDevice.current().play(strongest.isMajor ? .success : .click)
+    }
+}
+
+/// Keeps the complication current while the app is closed.
+///
+/// The app only fetched while on screen, so between visits the complication had nothing
+/// new to show. A watch app whose complication is on the active face gets up to four
+/// background refreshes an hour; each wake fetches, persists (which reloads the widget)
+/// and books the next. A wake that lands while the app is frontmost is dropped by the
+/// system, and leaving the app books a fresh one, so the chain survives that too.
+enum BackgroundRefresh {
+    static let identifier = "com.quotapets.watch.refresh"
+
+    /// Three wakes an hour: inside the four the system grants, and 72 widget reloads a
+    /// day against a budget of about 75.
+    static let interval: TimeInterval = 20 * 60
+
+    /// Only one request can be pending and a new one replaces it, so calling this more
+    /// often than needed is harmless.
+    @MainActor static func schedule() {
+        // The identifier rides as userInfo: that is how WatchKit routes the wake to the
+        // matching `.backgroundTask(.appRefresh(identifier))` handler.
+        WKApplication.shared().scheduleBackgroundRefresh(
+            withPreferredDate: Date().addingTimeInterval(interval),
+            userInfo: identifier as NSString
+        ) { _ in }
     }
 }
 
@@ -152,9 +197,18 @@ private struct UsageTabs: View {
     @EnvironmentObject private var model: WatchModel
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+    @AppStorage("bandana") private var bandana = true
+
+    /// Animation stops when the scene is inactive OR the display is dimmed for
+    /// Always-On (§16, §20).
+    private var isAnimating: Bool { scenePhase == .active && !isLuminanceReduced }
 
     var body: some View {
         TabView {
+            FaceView(usage: model.store.snapshot?.claude,
+                     generatedAt: model.store.snapshot?.generatedAt,
+                     working: model.store.working.contains(.claude),
+                     isAnimating: isAnimating)
             ForEach(AIProvider.allCases, id: \.self) { provider in
                 ProviderPageView(
                     provider: provider,
@@ -163,12 +217,13 @@ private struct UsageTabs: View {
                         SnapshotFreshness.evaluate(generatedAt: $0.generatedAt, now: model.now)
                     },
                     error: model.lastError?.watchLabel,
-                    // Animation stops when the scene is inactive OR the display is
-                    // dimmed for Always-On (§16, §20).
-                    isAnimating: scenePhase == .active && !isLuminanceReduced,
+                    working: model.store.working.contains(provider),
+                    isAnimating: isAnimating,
                     now: model.now
                 )
             }
+            Toggle("Bandana", isOn: $bandana)
+                .padding(.horizontal)
         }
         .tabViewStyle(.verticalPage)
         .onChange(of: scenePhase, initial: true) { _, phase in

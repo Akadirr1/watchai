@@ -2,8 +2,8 @@ import WidgetKit
 import SwiftUI
 import QuotaPetsShared
 
-/// Reads what the watch app wrote. Never fetches — the widget has no network budget to
-/// spend, and the app is the only thing that talks to the server.
+/// Reads what the watch app wrote. Never fetches: the app is the only thing that talks to
+/// the server, and it reloads these timelines every time it writes a new snapshot.
 func loadSharedSnapshot() -> UsageSnapshot? {
     guard let data = try? Data(contentsOf: SharedContainer.snapshotURL()) else { return nil }
     struct Persisted: Decodable { let snapshot: UsageSnapshot? }
@@ -18,11 +18,12 @@ struct QuotaEntry: TimelineEntry {
 /// Timeline provider.
 ///
 /// The budget is the binding constraint: watchOS allows **75 reloads per day**, about
-/// one per 19 minutes at best. So this deliberately emits a SHORT timeline and does not
-/// try to encode changing usage into future entries — the numbers only change when the
-/// phone delivers a new snapshot.
+/// one per 19 minutes at best. The numbers only change when the app writes a new
+/// snapshot, and the app reloads this timeline when it does (`SnapshotStore.persist`).
+/// So the timeline never schedules a reload of its own: a timed policy would spend that
+/// same budget re-reading a file nothing has rewritten.
 ///
-/// What keeps the complication alive between reloads is `Text(_:style:.timer)`, which
+/// What keeps the complication alive between reloads is `Text(timerInterval:)`, which
 /// advances on screen with no code running and no budget spend, and which Apple confirms
 /// keeps updating during Always-On (research §5). That is the entire §11 mechanism.
 struct QuotaProvider: TimelineProvider {
@@ -35,11 +36,8 @@ struct QuotaProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<QuotaEntry>) -> Void) {
-        let now = Date()
-        let entry = QuotaEntry(date: now, snapshot: loadSharedSnapshot())
-        // One entry, refreshed on the system's own schedule. Asking for more would spend
-        // budget to display values that cannot have changed.
-        completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(20 * 60))))
+        let entry = QuotaEntry(date: Date(), snapshot: loadSharedSnapshot())
+        completion(Timeline(entries: [entry], policy: .never))
     }
 }
 
@@ -59,18 +57,19 @@ private func remaining(_ usage: ProviderUsage?, _ kind: UsageWindowKind) -> Stri
     usage?.window(kind).map { "\(Int($0.remainingPercent.rounded()))" } ?? "--"
 }
 
+/// What the mascot reacts to, as a percentage: Claude's weekly window, Codex's tighter one.
+private func percentLeft(_ pressure: MascotPressure?) -> String {
+    pressure.map { "\(Int($0.remainingPercent.rounded()))%" } ?? "--"
+}
+
+/// Both providers at once: the rectangular and inline slots.
 struct QuotaComplicationView: View {
     @Environment(\.widgetFamily) private var family
     let entry: QuotaEntry
 
-    private var claude: ProviderUsage? { entry.snapshot?.claude }
-    private var codex: ProviderUsage? { entry.snapshot?.codex }
-
     var body: some View {
         switch family {
         case .accessoryRectangular: rectangular
-        case .accessoryCircular: circular
-        case .accessoryCorner: corner
         default: inline
         }
     }
@@ -81,7 +80,7 @@ struct QuotaComplicationView: View {
             ForEach(AIProvider.allCases, id: \.self) { provider in
                 let usage = entry.snapshot?.usage(for: provider)
                 HStack(spacing: 4) {
-                    Image(systemName: mascotSymbol(MascotStateResolver.resolve(usage)?.state ?? .normal))
+                    Image(systemName: mascotSymbol(MascotStateResolver.mascotPressure(usage)?.state ?? .normal))
                         .font(.system(size: 9))
                     Text(provider.displayName.uppercased())
                         .font(.system(size: 10, weight: .medium))
@@ -94,32 +93,111 @@ struct QuotaComplicationView: View {
         .containerBackground(for: .widget) { Color.clear }
     }
 
-    /// Tightest remaining across both windows of the selected provider (§18).
-    private var circular: some View {
-        let pressure = MascotStateResolver.resolve(claude)
-        return VStack(spacing: 0) {
-            Image(systemName: mascotSymbol(pressure?.state ?? .normal))
-                .font(.system(size: 12))
-            Text(pressure.map { "\(Int($0.remainingPercent.rounded()))%" } ?? "--")
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-        }
-        .containerBackground(for: .widget) { Color.clear }
-    }
-
-    private var corner: some View {
-        Text(MascotStateResolver.resolve(claude).map { "\(Int($0.remainingPercent.rounded()))%" } ?? "--")
-            .font(.system(size: 14, weight: .semibold, design: .rounded))
-            .containerBackground(for: .widget) { Color.clear }
-    }
-
-    /// `C 36% · X 53%` — kept minimal so the family is not overcrowded (§18).
+    /// `C 36% · X 53%` — each provider's number as its pet reads it (§18).
     private var inline: some View {
-        Text("C \(remaining(claude, .fiveHour))% · X \(remaining(codex, .weekly))%")
+        let c = percentLeft(MascotStateResolver.mascotPressure(entry.snapshot?.claude))
+        let x = percentLeft(MascotStateResolver.mascotPressure(entry.snapshot?.codex))
+        return Text("C \(c) · X \(x)")
             .containerBackground(for: .widget) { Color.clear }
     }
 }
 
-@main
+/// One window of one provider, for a corner or circular slot. Each of the four is its own
+/// entry in the face's complication picker, so every slot says one fixed thing instead of
+/// following whichever window happens to be tighter.
+struct WindowComplicationView: View {
+    @Environment(\.widgetFamily) private var family
+    let provider: AIProvider
+    let window: UsageWindowKind
+    let entry: QuotaEntry
+
+    private var number: String {
+        entry.snapshot?.usage(for: provider)?.window(window)
+            .map { "\(Int($0.remainingPercent.rounded()))" } ?? "--"
+    }
+
+    /// Bold digits with a small percent sign, set as one Text so the two scale together:
+    /// the number grows to whatever the slot allows, and a "100" shrinks instead of being
+    /// cut off. Interpolated rather than joined with `+`, which watchOS 26 deprecates.
+    private func percent(size: CGFloat) -> some View {
+        let digits = Text(verbatim: number)
+            .font(.system(size: size, weight: .bold, design: .rounded))
+        let sign = Text(verbatim: number == "--" ? "" : "%")
+            .font(.system(size: size * 0.4, weight: .bold, design: .rounded))
+        return Text("\(digits)\(sign)")
+            .lineLimit(1)
+            .minimumScaleFactor(0.4)
+    }
+
+    var body: some View {
+        switch family {
+        case .accessoryCorner:
+            percent(size: 28)
+                // Curves along the bezel.
+                .widgetLabel { Text("\(provider.displayName.uppercased()) \(window.shortLabel)") }
+                .containerBackground(for: .widget) { Color.clear }
+        default:
+            VStack(spacing: -2) {
+                Text(provider.displayName.uppercased())
+                    .font(.system(size: 7, weight: .medium))
+                percent(size: 24)
+                Text(window.shortLabel)
+                    .font(.system(size: 7, weight: .medium))
+            }
+            .containerBackground(for: .widget) { Color.clear }
+        }
+    }
+}
+
+// The four slot complications are written out one by one, each with literal strings, in
+// the same shape as the QuotaPets widget that has always registered on the watch. A
+// shared helper returning `some WidgetConfiguration` with interpolated names was the one
+// new construct in the descriptor path when the app vanished from the face's picker.
+
+struct ClaudeFiveHourWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "com.quotapets.claude-5h", provider: QuotaProvider()) { entry in
+            WindowComplicationView(provider: .claude, window: .fiveHour, entry: entry)
+        }
+        .configurationDisplayName("Claude 5H")
+        .description("Claude 5-hour quota left.")
+        .supportedFamilies([.accessoryCorner, .accessoryCircular])
+    }
+}
+
+struct ClaudeWeeklyWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "com.quotapets.claude-week", provider: QuotaProvider()) { entry in
+            WindowComplicationView(provider: .claude, window: .weekly, entry: entry)
+        }
+        .configurationDisplayName("Claude WEEK")
+        .description("Claude weekly quota left.")
+        .supportedFamilies([.accessoryCorner, .accessoryCircular])
+    }
+}
+
+struct CodexFiveHourWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "com.quotapets.codex-5h", provider: QuotaProvider()) { entry in
+            WindowComplicationView(provider: .codex, window: .fiveHour, entry: entry)
+        }
+        .configurationDisplayName("Codex 5H")
+        .description("Codex 5-hour quota left.")
+        .supportedFamilies([.accessoryCorner, .accessoryCircular])
+    }
+}
+
+struct CodexWeeklyWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "com.quotapets.codex-week", provider: QuotaProvider()) { entry in
+            WindowComplicationView(provider: .codex, window: .weekly, entry: entry)
+        }
+        .configurationDisplayName("Codex WEEK")
+        .description("Codex weekly quota left.")
+        .supportedFamilies([.accessoryCorner, .accessoryCircular])
+    }
+}
+
 struct QuotaPetsWidgets: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "com.quotapets.complication", provider: QuotaProvider()) { entry in
@@ -127,6 +205,17 @@ struct QuotaPetsWidgets: Widget {
         }
         .configurationDisplayName("QuotaPets")
         .description("Claude and Codex quota remaining.")
-        .supportedFamilies([.accessoryRectangular, .accessoryCircular, .accessoryCorner, .accessoryInline])
+        .supportedFamilies([.accessoryRectangular, .accessoryInline])
+    }
+}
+
+@main
+struct QuotaPetsWidgetBundle: WidgetBundle {
+    var body: some Widget {
+        ClaudeFiveHourWidget()
+        ClaudeWeeklyWidget()
+        CodexFiveHourWidget()
+        CodexWeeklyWidget()
+        QuotaPetsWidgets()
     }
 }

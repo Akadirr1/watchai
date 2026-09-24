@@ -1,19 +1,16 @@
 import SwiftUI
 import QuotaPetsShared
 
-/// Art slots (§14).
+/// Art slots (§14), for Codex only: Claude is always the drawn rig (`ClaudeMascotView`).
 ///
-/// The app ships with NO mascot artwork. Drop images into the watch target's asset
-/// catalog under exactly these names and they appear with no code change; until then the
-/// placeholder below renders, which is deliberately obvious rather than a generic emoji
-/// silently standing in for real art.
+/// Drop images into the watch target's asset catalog under exactly these names and they
+/// appear with no code change; until then the drawn pet renders.
 ///
-/// Required assets, per provider and energy state:
-///     claudeMascot-hyper, claudeMascot-happy, claudeMascot-normal,
-///     claudeMascot-tired, claudeMascot-exhausted, claudeMascot-empty
-///     codexMascot-<same six>
-/// A single `claudeMascot` / `codexMascot` is used as a fallback when a per-state image
-/// is missing, so partial art sets still work.
+/// Per energy state:
+///     codexMascot-hyper, codexMascot-happy, codexMascot-normal,
+///     codexMascot-tired, codexMascot-exhausted, codexMascot-empty
+/// A single `codexMascot` is used as a fallback when a per-state image is missing, so
+/// partial art sets still work.
 public enum MascotAsset {
     public static func name(for provider: AIProvider, state: MascotEnergyState) -> String {
         "\(provider.rawValue)Mascot-\(state.rawValue)"
@@ -29,29 +26,39 @@ public enum MascotAsset {
 public struct MascotView: View {
     public let provider: AIProvider
     public let state: MascotEnergyState
+    /// Usage rose since the last snapshot. Only the Claude mascot acts on it.
+    public let working: Bool
     /// Set false when the scene is inactive or the display dimmed, which stops every
     /// animation rather than merely hiding it (§16, §20).
     public let isAnimating: Bool
 
     @State private var breathing = false
 
-    public init(provider: AIProvider, state: MascotEnergyState, isAnimating: Bool) {
+    public init(provider: AIProvider, state: MascotEnergyState, working: Bool, isAnimating: Bool) {
         self.provider = provider
         self.state = state
+        self.working = working
         self.isAnimating = isAnimating
     }
 
     public var body: some View {
-        artwork
-            .frame(maxWidth: .infinity)
-            .scaleEffect(breathing ? idle.scale : 1.0)
-            .offset(y: breathing ? idle.drift : 0)
-            .opacity(state == .empty ? 0.55 : 1.0)
-            .animation(idle.animation, value: breathing)
-            .onAppear { breathing = shouldAnimate }
-            .onChange(of: isAnimating) { _, running in breathing = running && state.wantsIdleAnimation }
-            .onChange(of: state) { _, _ in breathing = shouldAnimate }
-            .accessibilityLabel("\(provider.displayName) mascot, \(state.rawValue)")
+        Group {
+            if provider == .claude {
+                // Animates itself per mood; the generic breathing below would fight it.
+                ClaudeMascotView(state: state, working: working, isAnimating: isAnimating)
+            } else {
+                artwork
+                    .frame(maxWidth: .infinity)
+                    .scaleEffect(breathing ? idle.scale : 1.0)
+                    .offset(y: breathing ? idle.drift : 0)
+                    .opacity(state == .empty ? 0.55 : 1.0)
+                    .animation(idle.animation, value: breathing)
+                    .onAppear { breathing = shouldAnimate }
+                    .onChange(of: isAnimating) { _, running in breathing = running && state.wantsIdleAnimation }
+                    .onChange(of: state) { _, _ in breathing = shouldAnimate }
+            }
+        }
+        .accessibilityLabel("\(provider.displayName) mascot, \(state.rawValue)")
     }
 
     private var shouldAnimate: Bool { isAnimating && state.wantsIdleAnimation }
@@ -67,7 +74,7 @@ public struct MascotView: View {
             // No asset supplied: draw the pet. This is the normal path, not a
             // degraded one — the drawn character animates per energy state, which a
             // static image cannot.
-            PetShapeView(provider: provider, state: state, isAnimating: isAnimating)
+            PetShapeView(state: state, isAnimating: isAnimating)
         }
     }
 
@@ -82,6 +89,49 @@ public struct MascotView: View {
         case .exhausted: return (1.01, 2, .easeInOut(duration: 5.0).repeatForever(autoreverses: true))
         case .empty:     return (1, 3, nil)
         }
+    }
+}
+
+/// The Claude mascot (github.com/Akadirr1/mascot), drawn from `ClaudeMascotRig`.
+///
+/// Plays the clips for the current mood on a loop. With the scene inactive, the display
+/// dimmed or Reduce Motion on, it holds the first frame instead of freezing mid-jump.
+struct ClaudeMascotView: View {
+    let state: MascotEnergyState
+    let working: Bool
+    let isAnimating: Bool
+
+    @AppStorage("bandana") private var bandana = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// When the current mood began, so a new one starts from its first clip.
+    @State private var start = Date()
+
+    private var rotation: [ClaudeClip] { ClaudeClip.rotation(for: state, working: working) }
+    private var moving: Bool { isAnimating && !reduceMotion }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !moving)) { timeline in
+            // Worked out here, so the renderer below captures a plain value, not view state.
+            let shapes = ClaudeMascotRig.shapes(rotation, at: moving ? timeline.date.timeIntervalSince(start) : 0,
+                                                bandana: bandana)
+            Canvas { context, size in
+                let box = ClaudeMascotRig.viewBox
+                let scale = min(size.width / box.width, size.height / box.height)
+                context.translateBy(x: (size.width - box.width * scale) / 2 - box.minX * scale,
+                                    y: (size.height - box.height * scale) / 2 - box.minY * scale)
+                context.scaleBy(x: scale, y: scale)
+                for shape in shapes {
+                    var path = Path()
+                    path.addLines(shape.points)
+                    path.closeSubpath()
+                    let color = Color(red: Double(shape.rgb >> 16 & 0xFF) / 255,
+                                      green: Double(shape.rgb >> 8 & 0xFF) / 255,
+                                      blue: Double(shape.rgb & 0xFF) / 255)
+                    context.fill(path, with: .color(color.opacity(shape.opacity)))
+                }
+            }
+        }
+        .onChange(of: rotation) { _, _ in start = .now }
     }
 }
 

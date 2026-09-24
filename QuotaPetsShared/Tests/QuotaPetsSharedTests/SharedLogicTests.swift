@@ -1,5 +1,8 @@
 import Testing
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics   // CGPoint arithmetic in the mascot tests, as in ClaudeMascotRig
+#endif
 @testable import QuotaPetsShared
 
 private let now = Date(timeIntervalSince1970: 1_757_000_000)
@@ -99,6 +102,24 @@ struct MascotTests {
         #expect(pressure?.constrainingWindow == .fiveHour)
     }
 
+    @Test("Claude's mascot reads the weekly window even when the five-hour one is tighter")
+    func claudeMascotFollowsWeekly() {
+        let tight5h = { (provider: AIProvider) in
+            ProviderUsage(provider: provider,
+                          fiveHour: UsageWindow(usedPercent: 95),   // 5 remaining
+                          weekly: UsageWindow(usedPercent: 40),     // 60 remaining
+                          fetchedAt: now)
+        }
+        let claude = MascotStateResolver.mascotPressure(tight5h(.claude))
+        #expect(claude?.state == .happy)
+        #expect(claude?.constrainingWindow == .weekly)
+        // Codex keeps the tighter window.
+        #expect(MascotStateResolver.mascotPressure(tight5h(.codex))?.constrainingWindow == .fiveHour)
+        // No weekly window: Claude falls back to the one it has.
+        let noWeekly = ProviderUsage(provider: .claude, fiveHour: UsageWindow(usedPercent: 95), fetchedAt: now)
+        #expect(MascotStateResolver.mascotPressure(noWeekly)?.constrainingWindow == .fiveHour)
+    }
+
     @Test("no windows and no usage both yield no pressure")
     func noData() {
         #expect(MascotStateResolver.resolve(ProviderUsage(provider: .codex, fetchedAt: now)) == nil)
@@ -109,6 +130,42 @@ struct MascotTests {
     func animationGating() {
         #expect(MascotEnergyState.empty.wantsIdleAnimation == false)
         #expect(MascotEnergyState.exhausted.wantsIdleAnimation)
+    }
+}
+
+@Suite("Claude mascot")
+struct ClaudeMascotTests {
+
+    @Test("each mood plays its own clips", arguments: [
+        (MascotEnergyState.hyper, false, [ClaudeClip.look, .jump, .idle]),
+        (.tired, true, [.walk, .tighten, .gym]),
+        (.exhausted, false, [.flagWave, .celebrate]),
+        (.empty, true, [.sweat]),
+    ])
+    func rotations(state: MascotEnergyState, working: Bool, expected: [ClaudeClip]) {
+        #expect(ClaudeClip.rotation(for: state, working: working) == expected)
+    }
+
+    // Clips play back to back, so each must hand over on the stance the next starts from.
+    // Confetti may still be falling past the rig's shapes; the JS clears it on the next clip.
+    // Sweat loops for as long as the quota stays gone, so it never hands over.
+    @Test("every clip ends on the rest pose",
+          arguments: [ClaudeClip.look, .jump, .idle, .walk, .tighten, .gym, .flagWave, .celebrate])
+    func endsAtRest(clip: ClaudeClip) {
+        let rest = ClaudeMascotRig.shapes([.idle], at: 0, bandana: true)
+        let end = ClaudeMascotRig.shapes([clip], at: ClaudeMascotRig.duration(clip, bandana: true) - 0.001, bandana: true)
+        #expect(end.count >= rest.count)
+        for (a, b) in zip(end, rest) {
+            #expect(a.rgb == b.rgb)
+            #expect(zip(a.points, b.points).allSatisfy { abs($0.x - $1.x) < 0.01 && abs($0.y - $1.y) < 0.01 })
+        }
+    }
+
+    @Test("the bandana is drawn only when switched on")
+    func bandana() {
+        let band: UInt32 = 0xB4453A
+        #expect(ClaudeMascotRig.shapes([.idle], at: 0, bandana: true).contains { $0.rgb == band })
+        #expect(!ClaudeMascotRig.shapes([.idle], at: 0, bandana: false).contains { $0.rgb == band })
     }
 }
 
@@ -264,8 +321,18 @@ struct SnapshotTests {
         #expect(decoded == snapshot)
     }
 
-
-
+    @Test("a provider is busy only while its usage climbs between neighbouring polls")
+    func busy() {
+        func snap(_ used: Double, at seconds: Double) -> UsageSnapshot {
+            UsageSnapshot(claude: ProviderUsage(provider: .claude, fiveHour: UsageWindow(usedPercent: used), fetchedAt: now),
+                          generatedAt: now.addingTimeInterval(seconds))
+        }
+        #expect(snap(41, at: 60).busyProviders(since: snap(40, at: 0)) == [.claude])
+        #expect(snap(40, at: 60).busyProviders(since: snap(40, at: 0)).isEmpty)
+        // An hour-old snapshot says nothing about right now.
+        #expect(snap(41, at: 3600).busyProviders(since: snap(40, at: 0)).isEmpty)
+        #expect(snap(41, at: 60).busyProviders(since: nil).isEmpty)
+    }
 }
 
 // MARK: - Timestamp decoding

@@ -11,10 +11,11 @@ struct ProviderPageView: View {
     let freshness: SnapshotFreshness?
     /// Compact label such as AUTH / OFFLINE, already reduced for a small screen.
     let error: String?
+    let working: Bool
     let isAnimating: Bool
     let now: Date
 
-    private var pressure: MascotPressure? { MascotStateResolver.resolve(usage) }
+    private var pressure: MascotPressure? { MascotStateResolver.mascotPressure(usage) }
 
     var body: some View {
         VStack(spacing: 4) {
@@ -24,8 +25,11 @@ struct ProviderPageView: View {
 
             MascotView(provider: provider,
                        state: pressure?.state ?? .normal,
+                       // Busy means the latest poll saw usage climb; stale data can't say.
+                       working: working && freshness?.isStale == false,
                        isAnimating: isAnimating)
-                .frame(height: 74)
+                // Whatever the text leaves: the rig's view box keeps headroom for jumps.
+                .frame(minHeight: 74, maxHeight: .infinity)
 
             if let error {
                 Text(error)
