@@ -28,9 +28,12 @@ final class WatchModel: ObservableObject {
     @Published private(set) var isPaired: Bool
 
     private var client: APIClient?
-    /// Foreground-only ticker. Stopped the moment the scene leaves `.active`, so nothing
-    /// pretends to survive suspension.
+    /// The 30 s poll. Runs while the app is on screen, dimmed under Always-On, or kept
+    /// running off screen by `keepAlive`, and stops once none of those holds.
     private var ticker: Timer?
+    /// Up to an hour of background runtime after every visit (see `KeepAlive`).
+    private let keepAlive = KeepAlive()
+    private var inBackground = false
     /// Guards against the timer and an onAppear both fetching at once.
     private var inFlight = false
     /// `store` is a nested ObservableObject, so its own changes do not reach this one's
@@ -46,20 +49,40 @@ final class WatchModel: ObservableObject {
         self.storeChanges = store.objectWillChange.sink { [weak self] _ in
             MainActor.assumeIsolated { self?.objectWillChange.send() }
         }
+        keepAlive.onEnd = { [weak self] in
+            if self?.inBackground == true { self?.stopTicking() }
+        }
     }
 
-    func becameActive() {
+    /// Active polls and renews the hour. Always-On (inactive) changes nothing: the app is
+    /// still frontmost, so it keeps polling. Background polls only while the keep-alive
+    /// session lasts.
+    func sceneChanged(to phase: ScenePhase) {
+        inBackground = phase == .background
+        switch phase {
+        case .active: becameActive()
+        case .background: leftScreen()
+        default: break
+        }
+    }
+
+    private func becameActive() {
         guard client != nil else { return }
         // Cached data is already on screen; ask for fresh in the background.
         refresh()
         startTicking()
+        keepAlive.start()
     }
 
-    func becameInactive() {
-        ticker?.invalidate()
-        ticker = nil
+    private func leftScreen() {
         // Off screen, the app is still the complication's only source of new numbers.
         if client != nil { BackgroundRefresh.schedule() }
+        if !keepAlive.isRunning { stopTicking() }
+    }
+
+    private func stopTicking() {
+        ticker?.invalidate()
+        ticker = nil
     }
 
     /// The `.appRefresh` wake: one fetch — which persists and so reloads the
@@ -87,12 +110,13 @@ final class WatchModel: ObservableObject {
     private func unpair() {
         DeviceTokenStore.clear()
         client = nil
-        becameInactive()
+        stopTicking()
+        keepAlive.stop()
         isPaired = false
     }
 
     /// One timer drives both the clock label and the fetch, so there is no second polling
-    /// loop to duplicate. Every 30 s while on screen, where widget reloads cost nothing.
+    /// loop to duplicate.
     private func startTicking() {
         ticker?.invalidate()
         let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
@@ -106,7 +130,7 @@ final class WatchModel: ObservableObject {
     }
 
     func refresh() {
-        Task { await fetch(announcing: true) }
+        Task { await fetch(announcing: !inBackground) }
     }
 
     /// The one fetch, for the foreground ticker and the background wake alike. No haptic
@@ -135,6 +159,53 @@ final class WatchModel: ObservableObject {
     private static func playHaptics(for events: [QuotaEvent]) {
         guard let strongest = events.max(by: { !$0.isMajor && $1.isMajor }) else { return }
         WKInterfaceDevice.current().play(strongest.isMajor ? .success : .click)
+    }
+}
+
+/// Up to an hour of background runtime after every visit, so the 30 s poll keeps going
+/// with the wrist down instead of waiting on the four background wakes an hour watchOS
+/// hands out. watchOS grants that as an extended runtime session of the "physical
+/// therapy" type (`WKBackgroundModes` in project.yml). This is a personal build: Apple
+/// asks that the session type match the app's purpose, so as it stands this would not
+/// pass App Review.
+@MainActor
+final class KeepAlive: NSObject, WKExtendedRuntimeSessionDelegate {
+    private var session: WKExtendedRuntimeSession?
+    var onEnd: (() -> Void)?
+
+    var isRunning: Bool { session?.state == .running }
+
+    /// Only while the app is active, the one state watchOS starts a session from.
+    /// Renews a spent session and leaves a live one alone.
+    func start() {
+        if let session, session.state != .invalid { return }
+        let next = WKExtendedRuntimeSession()
+        next.delegate = self
+        next.start()
+        session = next
+    }
+
+    func stop() {
+        session?.invalidate()
+        session = nil
+    }
+
+    nonisolated func extendedRuntimeSessionDidStart(_ extendedRuntimeSession: WKExtendedRuntimeSession) {}
+
+    // Nothing to wind down: the next poll simply does not happen.
+    nonisolated func extendedRuntimeSessionWillExpire(_ extendedRuntimeSession: WKExtendedRuntimeSession) {}
+
+    nonisolated func extendedRuntimeSession(_ extendedRuntimeSession: WKExtendedRuntimeSession,
+                                            didInvalidateWith reason: WKExtendedRuntimeSessionInvalidationReason,
+                                            error: (any Error)?) {
+        // Only the session this object is holding: a late callback from an old one must
+        // not clear the fresh session that replaced it.
+        let ended = ObjectIdentifier(extendedRuntimeSession)
+        Task { @MainActor [weak self] in
+            guard let self, let session, ObjectIdentifier(session) == ended else { return }
+            self.session = nil
+            onEnd?()
+        }
     }
 }
 
@@ -241,7 +312,7 @@ private struct UsageTabs: View {
         }
         .tabViewStyle(.verticalPage)
         .onChange(of: scenePhase, initial: true) { _, phase in
-            phase == .active ? model.becameActive() : model.becameInactive()
+            model.sceneChanged(to: phase)
         }
     }
 }
