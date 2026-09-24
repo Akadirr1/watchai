@@ -88,9 +88,6 @@ targets:
     platform: watchOS
     sources:
       - path: Apps/QuotaPetsWidgets
-      # Compiled into both targets, so the Claude Pet complication draws the same
-      # creature as the app rather than a second copy of it.
-      - path: Apps/QuotaPetsWatch/Mascots/PetShapes.swift
     dependencies:
       - package: QuotaPetsShared
     entitlements:

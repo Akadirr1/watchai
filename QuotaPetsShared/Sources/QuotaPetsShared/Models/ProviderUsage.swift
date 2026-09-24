@@ -61,6 +61,18 @@ public struct UsageSnapshot: Codable, Sendable, Hashable {
         }
     }
 
+    /// Providers whose usage rose since `previous`: the only sign of work in progress the
+    /// server exposes. Snapshots more than a few 60-second polls apart say nothing about now.
+    public func busyProviders(since previous: UsageSnapshot?) -> Set<AIProvider> {
+        guard let previous, generatedAt.timeIntervalSince(previous.generatedAt) < 180 else { return [] }
+        return Set(AIProvider.allCases.filter { provider in
+            guard let before = previous.usage(for: provider), let after = usage(for: provider) else { return false }
+            return [UsageWindowKind.fiveHour, .weekly].contains {
+                (after.window($0)?.usedPercent ?? 0) > (before.window($0)?.usedPercent ?? 0)
+            }
+        })
+    }
+
     /// Replaces one provider's slot, preserving the other. Used when the two providers
     /// are fetched on a stagger (§9) and only one has new data.
     public func replacing(_ usage: ProviderUsage, generatedAt: Date) -> UsageSnapshot {

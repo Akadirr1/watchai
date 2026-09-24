@@ -14,6 +14,8 @@ import QuotaPetsShared
 struct FaceView: View {
     let usage: ProviderUsage?
     let generatedAt: Date?
+    /// Usage rose since the last poll, which puts Claude to work.
+    let working: Bool
     let isAnimating: Bool
 
     @State private var hopping = false
@@ -25,6 +27,9 @@ struct FaceView: View {
         // Once a minute is all Always-On redraws anyway, and the staleness check rides
         // the same tick — `model.now` stops with the ticker the moment the wrist drops.
         TimelineView(.everyMinute) { context in
+            let stale = generatedAt.map {
+                SnapshotFreshness.evaluate(generatedAt: $0, now: context.date).isStale
+            } ?? true
             VStack(spacing: 2) {
                 Text(context.date, format: .dateTime.weekday(.abbreviated).day())
                     .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -35,10 +40,13 @@ struct FaceView: View {
                     .monospacedDigit()
 
                 Button { pet() } label: {
-                    MascotView(provider: .claude, state: state, isAnimating: isAnimating)
-                        .frame(height: 84)
-                        // A full pet leaps, a spent one barely stirs: the reaction reads
-                        // the same energy the arms do.
+                    // Busy only on fresh data, as on the Claude page: stale can't say.
+                    MascotView(provider: .claude, state: state, working: working && !stale,
+                               isAnimating: isAnimating)
+                        // Whatever the text leaves: the rig keeps headroom for its jumps.
+                        .frame(minHeight: 74, maxHeight: .infinity)
+                        // A full pet leaps, a spent one barely stirs: the tap reads the
+                        // same energy as the mood.
                         .offset(y: hopping ? -CGFloat(18 - 3 * state.severity) : 0)
                         .animation(.spring(response: 0.22, dampingFraction: 0.45), value: hopping)
                 }

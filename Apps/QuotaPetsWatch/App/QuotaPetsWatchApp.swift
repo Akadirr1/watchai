@@ -197,6 +197,7 @@ private struct UsageTabs: View {
     @EnvironmentObject private var model: WatchModel
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+    @AppStorage("bandana") private var bandana = true
 
     /// Animation stops when the scene is inactive OR the display is dimmed for
     /// Always-On (§16, §20).
@@ -206,6 +207,7 @@ private struct UsageTabs: View {
         TabView {
             FaceView(usage: model.store.snapshot?.claude,
                      generatedAt: model.store.snapshot?.generatedAt,
+                     working: model.store.working.contains(.claude),
                      isAnimating: isAnimating)
             ForEach(AIProvider.allCases, id: \.self) { provider in
                 ProviderPageView(
@@ -215,10 +217,13 @@ private struct UsageTabs: View {
                         SnapshotFreshness.evaluate(generatedAt: $0.generatedAt, now: model.now)
                     },
                     error: model.lastError?.watchLabel,
+                    working: model.store.working.contains(provider),
                     isAnimating: isAnimating,
                     now: model.now
                 )
             }
+            Toggle("Bandana", isOn: $bandana)
+                .padding(.horizontal)
         }
         .tabViewStyle(.verticalPage)
         .onChange(of: scenePhase, initial: true) { _, phase in

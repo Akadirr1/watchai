@@ -135,13 +135,45 @@ struct QuotaComplicationView: View {
     }
 }
 
+/// The pixel Claude from `ClaudeMascotRig`, cropped to the character. The app's
+/// `ClaudeMascotView` fills the same polygons; this copy exists because the widget target
+/// shares only the package with the app, never the app's own files.
+private struct ClaudeRigCanvas: View {
+    let shapes: [RigShape]
+
+    var body: some View {
+        // Worked out before the Canvas, so the renderer captures plain values.
+        let visible = shapes.filter { $0.opacity > 0 }
+        let xs = visible.flatMap { $0.points.map(\.x) }
+        let ys = visible.flatMap { $0.points.map(\.y) }
+        Canvas { context, size in
+            guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max(),
+                  maxX > minX, maxY > minY else { return }
+            let scale = min(size.width / (maxX - minX), size.height / (maxY - minY))
+            context.translateBy(x: (size.width - (maxX - minX) * scale) / 2 - minX * scale,
+                                y: (size.height - (maxY - minY) * scale) / 2 - minY * scale)
+            context.scaleBy(x: scale, y: scale)
+            for shape in visible {
+                var path = Path()
+                path.addLines(shape.points)
+                path.closeSubpath()
+                let color = Color(red: Double(shape.rgb >> 16 & 0xFF) / 255,
+                                  green: Double(shape.rgb >> 8 & 0xFF) / 255,
+                                  blue: Double(shape.rgb & 0xFF) / 255)
+                context.fill(path, with: .color(color.opacity(shape.opacity)))
+            }
+        }
+    }
+}
+
 /// Claude, drawn, on the watch face — the biggest surface watchOS gives a third-party
 /// app: a rectangular slot on Modular, Modular Duo, Modular Ultra, Infograph Modular or
 /// the Smart Stack.
 ///
-/// A complication cannot animate, so the pet holds the pose for its current energy and
-/// the countdown is what moves. `Text(timerInterval:)` rather than `.timer`: it stops at
-/// zero instead of counting back up past a reset the snapshot has not caught up with.
+/// A complication cannot animate, so the pixel Claude holds the first frame of its mood —
+/// what the app shows while dimmed — and the countdown is what moves.
+/// `Text(timerInterval:)` rather than `.timer`: it stops at zero instead of counting back
+/// up past a reset the snapshot has not caught up with.
 struct ClaudePetView: View {
     let entry: QuotaEntry
 
@@ -149,9 +181,11 @@ struct ClaudePetView: View {
         let usage = entry.snapshot?.claude
         let pressure = MascotStateResolver.resolve(usage)
         HStack(spacing: 6) {
-            ClaudeSparkPet(pose: .pose(for: pressure?.state ?? .normal),
-                           isAnimating: false, blinkClosed: false, breathing: false)
-                .aspectRatio(1, contentMode: .fit)
+            // The bandana switch lives in the app's own defaults, out of the widget's reach;
+            // on is its default.
+            ClaudeRigCanvas(shapes: ClaudeMascotRig.shapes(
+                ClaudeClip.rotation(for: pressure?.state ?? .normal, working: false), at: 0, bandana: true))
+                .aspectRatio(1.5, contentMode: .fit)
                 .widgetAccentable()
 
             VStack(alignment: .leading, spacing: 0) {
