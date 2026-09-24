@@ -38,7 +38,7 @@ settings:
     # The build number both targets carry. Bump it whenever the widget list changes:
     # watchOS can keep offering the old complications after a same-version reinstall,
     # and app and extension must always agree on it.
-    CURRENT_PROJECT_VERSION: "2"
+    CURRENT_PROJECT_VERSION: "3"
 
 packages:
   QuotaPetsShared:

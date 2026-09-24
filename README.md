@@ -261,10 +261,7 @@ face (Facer, the "live" face galleries), or an app that draws a clock and stays 
 
 - **Complications.** Four for corner and circular slots — *Claude 5H*, *Claude WEEK*,
   *Codex 5H*, *Codex WEEK* — so each slot holds the one number you picked for it.
-  *QuotaPets* shows both providers in a rectangular or inline slot. *Claude Pet* is
-  rectangular: the pixel Claude at its weekly energy, still, with a live reset countdown.
-  It needs a face with a rectangular slot — Modular, Modular Duo, Modular Ultra,
-  Infograph Modular — or the Smart Stack.
+  *QuotaPets* shows both providers in a rectangular or inline slot.
 - **The live pet** is the app's first page: date, clock, the pixel Claude playing its
   clips, and a tap (or Double Tap on Series 9 / Ultra 2) makes it hop — higher the more
   weekly quota is left. The system's corner clock is hidden there, so it reads as a face,

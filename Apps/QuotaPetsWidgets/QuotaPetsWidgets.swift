@@ -138,141 +138,52 @@ struct WindowComplicationView: View {
     }
 }
 
-/// The pixel Claude from `ClaudeMascotRig`, cropped to the character. The app's
-/// `ClaudeMascotView` fills the same polygons; this copy exists because the widget target
-/// shares only the package with the app, never the app's own files.
-private struct ClaudeRigCanvas: View {
-    let shapes: [RigShape]
-
-    var body: some View {
-        // Worked out before the Canvas, so the renderer captures plain values.
-        let visible = shapes.filter { $0.opacity > 0 }
-        let xs = visible.flatMap { $0.points.map(\.x) }
-        let ys = visible.flatMap { $0.points.map(\.y) }
-        Canvas { context, size in
-            guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max(),
-                  maxX > minX, maxY > minY else { return }
-            let scale = min(size.width / (maxX - minX), size.height / (maxY - minY))
-            context.translateBy(x: (size.width - (maxX - minX) * scale) / 2 - minX * scale,
-                                y: (size.height - (maxY - minY) * scale) / 2 - minY * scale)
-            context.scaleBy(x: scale, y: scale)
-            for shape in visible {
-                var path = Path()
-                path.addLines(shape.points)
-                path.closeSubpath()
-                let color = Color(red: Double(shape.rgb >> 16 & 0xFF) / 255,
-                                  green: Double(shape.rgb >> 8 & 0xFF) / 255,
-                                  blue: Double(shape.rgb & 0xFF) / 255)
-                context.fill(path, with: .color(color.opacity(shape.opacity)))
-            }
-        }
-    }
-}
-
-/// Claude, drawn, on the watch face — the biggest surface watchOS gives a third-party
-/// app: a rectangular slot on Modular, Modular Duo, Modular Ultra, Infograph Modular or
-/// the Smart Stack.
-///
-/// A complication cannot animate, so the pixel Claude holds the first frame of its mood —
-/// what the app shows while dimmed — and the countdown is what moves.
-/// `Text(timerInterval:)` rather than `.timer`: it stops at zero instead of counting back
-/// up past a reset the snapshot has not caught up with.
-struct ClaudePetView: View {
-    let entry: QuotaEntry
-
-    var body: some View {
-        let usage = entry.snapshot?.claude
-        let pressure = MascotStateResolver.mascotPressure(usage)
-        HStack(spacing: 6) {
-            // The bandana switch lives in the app's own defaults, out of the widget's reach;
-            // on is its default.
-            ClaudeRigCanvas(shapes: ClaudeMascotRig.shapes(
-                ClaudeClip.rotation(for: pressure?.state ?? .normal, working: false), at: 0, bandana: true))
-                .aspectRatio(1.5, contentMode: .fit)
-                .widgetAccentable()
-
-            VStack(alignment: .leading, spacing: 0) {
-                Text("CLAUDE")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(percentLeft(pressure))
-                        .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    if let kind = pressure?.constrainingWindow {
-                        Text(kind.shortLabel)
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                }
-                if let kind = pressure?.constrainingWindow,
-                   let reset = usage?.window(kind)?.resetAt, reset > entry.date {
-                    // A weekly reset days away reads better as a day than as 100+ hours.
-                    Group {
-                        if reset.timeIntervalSince(entry.date) < 86_400 {
-                            Text(timerInterval: entry.date...reset, countsDown: true)
-                        } else {
-                            Text(reset, format: .dateTime.weekday(.abbreviated).hour().minute())
-                        }
-                    }
-                    .font(.system(size: 11, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .containerBackground(for: .widget) { Color.clear }
-    }
-}
-
-@main
-struct QuotaPetsWidgetBundle: WidgetBundle {
-    var body: some Widget {
-        ClaudeFiveHourWidget()
-        ClaudeWeeklyWidget()
-        CodexFiveHourWidget()
-        CodexWeeklyWidget()
-        QuotaPetsWidgets()
-        ClaudePetWidget()
-    }
-}
-
-@MainActor
-private func windowWidget(_ provider: AIProvider, _ window: UsageWindowKind) -> some WidgetConfiguration {
-    let name = "\(provider.displayName) \(window.shortLabel)"
-    let span = window == .fiveHour ? "5-hour" : "weekly"
-    return StaticConfiguration(kind: "com.quotapets.\(provider.rawValue).\(window.rawValue)",
-                               provider: QuotaProvider()) { entry in
-        WindowComplicationView(provider: provider, window: window, entry: entry)
-    }
-    .configurationDisplayName(name)
-    .description("\(provider.displayName) \(span) quota left.")
-    .supportedFamilies([.accessoryCorner, .accessoryCircular])
-}
+// The four slot complications are written out one by one, each with literal strings, in
+// the same shape as the QuotaPets widget that has always registered on the watch. A
+// shared helper returning `some WidgetConfiguration` with interpolated names was the one
+// new construct in the descriptor path when the app vanished from the face's picker.
 
 struct ClaudeFiveHourWidget: Widget {
-    var body: some WidgetConfiguration { windowWidget(.claude, .fiveHour) }
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "com.quotapets.claude-5h", provider: QuotaProvider()) { entry in
+            WindowComplicationView(provider: .claude, window: .fiveHour, entry: entry)
+        }
+        .configurationDisplayName("Claude 5H")
+        .description("Claude 5-hour quota left.")
+        .supportedFamilies([.accessoryCorner, .accessoryCircular])
+    }
 }
 
 struct ClaudeWeeklyWidget: Widget {
-    var body: some WidgetConfiguration { windowWidget(.claude, .weekly) }
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "com.quotapets.claude-week", provider: QuotaProvider()) { entry in
+            WindowComplicationView(provider: .claude, window: .weekly, entry: entry)
+        }
+        .configurationDisplayName("Claude WEEK")
+        .description("Claude weekly quota left.")
+        .supportedFamilies([.accessoryCorner, .accessoryCircular])
+    }
 }
 
 struct CodexFiveHourWidget: Widget {
-    var body: some WidgetConfiguration { windowWidget(.codex, .fiveHour) }
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "com.quotapets.codex-5h", provider: QuotaProvider()) { entry in
+            WindowComplicationView(provider: .codex, window: .fiveHour, entry: entry)
+        }
+        .configurationDisplayName("Codex 5H")
+        .description("Codex 5-hour quota left.")
+        .supportedFamilies([.accessoryCorner, .accessoryCircular])
+    }
 }
 
 struct CodexWeeklyWidget: Widget {
-    var body: some WidgetConfiguration { windowWidget(.codex, .weekly) }
-}
-
-struct ClaudePetWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "com.quotapets.pet", provider: QuotaProvider()) { entry in
-            ClaudePetView(entry: entry)
+        StaticConfiguration(kind: "com.quotapets.codex-week", provider: QuotaProvider()) { entry in
+            WindowComplicationView(provider: .codex, window: .weekly, entry: entry)
         }
-        .configurationDisplayName("Claude Pet")
-        .description("Claude at its weekly energy, with the reset countdown.")
-        .supportedFamilies([.accessoryRectangular])
+        .configurationDisplayName("Codex WEEK")
+        .description("Codex weekly quota left.")
+        .supportedFamilies([.accessoryCorner, .accessoryCircular])
     }
 }
 
@@ -284,5 +195,16 @@ struct QuotaPetsWidgets: Widget {
         .configurationDisplayName("QuotaPets")
         .description("Claude and Codex quota remaining.")
         .supportedFamilies([.accessoryRectangular, .accessoryInline])
+    }
+}
+
+@main
+struct QuotaPetsWidgetBundle: WidgetBundle {
+    var body: some Widget {
+        ClaudeFiveHourWidget()
+        ClaudeWeeklyWidget()
+        CodexFiveHourWidget()
+        CodexWeeklyWidget()
+        QuotaPetsWidgets()
     }
 }
