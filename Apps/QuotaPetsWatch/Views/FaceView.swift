@@ -1,15 +1,16 @@
+import AVKit
 import SwiftUI
 import WatchKit
 import QuotaPetsShared
 
-/// The live pet, dressed as a watch face.
+/// The live pet, as a watch face.
 ///
-/// As close as watchOS lets a third-party app get: apps cannot ship watch faces, and a
-/// complication is a static snapshot that cannot animate, so a pet that breathes, blinks
-/// and wilts can only live in the app. This is its first page, so opening the app lands
-/// here. With Settings › General › Return to Clock › QuotaPets › Custom › After 1 hour, a
-/// wrist raise brings it back instead of the clock, and Always-On keeps it on screen,
-/// dimmed and still.
+/// watchOS has no API for third-party faces, up to and including watchOS 27. Every
+/// "custom face" app is one of two things: an image or Live Photo on Apple's Photos face,
+/// or an app that draws a clock and stays in front — Clockology is the latter, and so is
+/// this. It is the app's first page, so opening the app lands here. With Settings ›
+/// General › Return to Clock › QuotaPets › Custom › After 1 hour, a wrist raise brings it
+/// back instead of the Apple face, and Always-On keeps it on screen, dimmed and still.
 struct FaceView: View {
     let usage: ProviderUsage?
     let generatedAt: Date?
@@ -25,13 +26,17 @@ struct FaceView: View {
         // the same tick — `model.now` stops with the ticker the moment the wrist drops.
         TimelineView(.everyMinute) { context in
             VStack(spacing: 2) {
+                Text(context.date, format: .dateTime.weekday(.abbreviated).day())
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .textCase(.uppercase)
+                    .foregroundStyle(.secondary)
                 Text(context.date, format: .dateTime.hour(.defaultDigits(amPM: .omitted)).minute())
-                    .font(.system(size: 36, weight: .semibold, design: .rounded))
+                    .font(.system(size: 34, weight: .semibold, design: .rounded))
                     .monospacedDigit()
 
                 Button { pet() } label: {
                     MascotView(provider: .claude, state: state, isAnimating: isAnimating)
-                        .frame(height: 92)
+                        .frame(height: 84)
                         // A full pet leaps, a spent one barely stirs: the reaction reads
                         // the same energy the arms do.
                         .offset(y: hopping ? -CGFloat(18 - 3 * state.severity) : 0)
@@ -43,6 +48,18 @@ struct FaceView: View {
 
                 summary(now: context.date)
             }
+        }
+        // Every watch app carries the system time in its corner, which gives a face two
+        // clocks. watchOS drops it while a VideoPlayer is on screen, so an invisible one
+        // does the job — a known workaround for full-screen clocks. Undocumented: if an
+        // update stops honouring it, the small system time simply comes back.
+        .background {
+            VideoPlayer(player: nil)
+                .focusable(false) // keeps the Digital Crown on page scrolling, not volume
+                .disabled(true)
+                .opacity(0)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
         }
     }
 

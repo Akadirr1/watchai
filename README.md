@@ -247,16 +247,19 @@ Personal Team.
 
 ### On the watch face
 
-watchOS lets no third-party app ship a watch face, and a complication is a static snapshot —
-it cannot animate. So the pet reaches the face two ways:
+watchOS has no API for third-party watch faces — still none in watchOS 27. Every "custom
+face" app on the App Store is one of two things: an image or Live Photo on Apple's Photos
+face (Facer, the "live" face galleries), or an app that draws a clock and stays in front
+(Clockology). QuotaPets does the second, plus complications:
 
 - **Complications.** *QuotaPets* fits all four families; the circular and corner ones
   name the window their number is from. *Claude Pet* is rectangular: Claude drawn at its
   current energy, the tighter window, and a live reset countdown. It needs a face with a
   rectangular slot — Modular, Modular Duo, Modular Ultra, Infograph Modular — or the
   Smart Stack.
-- **The live pet** is the app's first page: a clock, Claude breathing and blinking, and a
-  tap (or Double Tap on Series 9 / Ultra 2) makes it hop — higher the more quota is left.
+- **The live pet** is the app's first page: date, clock, Claude breathing and blinking,
+  and a tap (or Double Tap on Series 9 / Ultra 2) makes it hop — higher the more quota is
+  left. The system's corner clock is hidden there, so it reads as a face, not an app.
   Settings › General › Return to Clock › QuotaPets › Custom › **After 1 hour** keeps it on
   your wrist the way a face would; Always-On keeps it visible, dimmed and still.
 
