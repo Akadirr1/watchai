@@ -40,4 +40,16 @@ public enum MascotStateResolver {
             constrainingWindow: tightest.0
         )
     }
+
+    /// What a provider's mascot reacts to. Claude's pixel mascot reads the weekly window
+    /// alone; Codex's reads the tighter of the two, as `resolve` does. A Claude snapshot
+    /// with no weekly window falls back to the tighter one rather than to nothing.
+    public static func mascotPressure(_ usage: ProviderUsage?) -> MascotPressure? {
+        guard let usage, usage.provider == .claude, let weekly = usage.weekly else { return resolve(usage) }
+        return MascotPressure(
+            state: state(forRemainingPercent: weekly.remainingPercent),
+            remainingPercent: weekly.remainingPercent,
+            constrainingWindow: .weekly
+        )
+    }
 }

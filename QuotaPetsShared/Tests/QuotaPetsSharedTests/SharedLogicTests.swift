@@ -102,6 +102,24 @@ struct MascotTests {
         #expect(pressure?.constrainingWindow == .fiveHour)
     }
 
+    @Test("Claude's mascot reads the weekly window even when the five-hour one is tighter")
+    func claudeMascotFollowsWeekly() {
+        let tight5h = { (provider: AIProvider) in
+            ProviderUsage(provider: provider,
+                          fiveHour: UsageWindow(usedPercent: 95),   // 5 remaining
+                          weekly: UsageWindow(usedPercent: 40),     // 60 remaining
+                          fetchedAt: now)
+        }
+        let claude = MascotStateResolver.mascotPressure(tight5h(.claude))
+        #expect(claude?.state == .happy)
+        #expect(claude?.constrainingWindow == .weekly)
+        // Codex keeps the tighter window.
+        #expect(MascotStateResolver.mascotPressure(tight5h(.codex))?.constrainingWindow == .fiveHour)
+        // No weekly window: Claude falls back to the one it has.
+        let noWeekly = ProviderUsage(provider: .claude, fiveHour: UsageWindow(usedPercent: 95), fetchedAt: now)
+        #expect(MascotStateResolver.mascotPressure(noWeekly)?.constrainingWindow == .fiveHour)
+    }
+
     @Test("no windows and no usage both yield no pressure")
     func noData() {
         #expect(MascotStateResolver.resolve(ProviderUsage(provider: .codex, fetchedAt: now)) == nil)

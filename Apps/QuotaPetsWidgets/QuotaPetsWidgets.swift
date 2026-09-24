@@ -57,23 +57,19 @@ private func remaining(_ usage: ProviderUsage?, _ kind: UsageWindowKind) -> Stri
     usage?.window(kind).map { "\(Int($0.remainingPercent.rounded()))" } ?? "--"
 }
 
-/// The tighter window's remaining — the same number the pet's mood is drawn from.
-private func tightest(_ pressure: MascotPressure?) -> String {
+/// What the mascot reacts to, as a percentage: Claude's weekly window, Codex's tighter one.
+private func percentLeft(_ pressure: MascotPressure?) -> String {
     pressure.map { "\(Int($0.remainingPercent.rounded()))%" } ?? "--"
 }
 
+/// Both providers at once: the rectangular and inline slots.
 struct QuotaComplicationView: View {
     @Environment(\.widgetFamily) private var family
     let entry: QuotaEntry
 
-    private var claude: ProviderUsage? { entry.snapshot?.claude }
-    private var codex: ProviderUsage? { entry.snapshot?.codex }
-
     var body: some View {
         switch family {
         case .accessoryRectangular: rectangular
-        case .accessoryCircular: circular
-        case .accessoryCorner: corner
         default: inline
         }
     }
@@ -84,7 +80,7 @@ struct QuotaComplicationView: View {
             ForEach(AIProvider.allCases, id: \.self) { provider in
                 let usage = entry.snapshot?.usage(for: provider)
                 HStack(spacing: 4) {
-                    Image(systemName: mascotSymbol(MascotStateResolver.resolve(usage)?.state ?? .normal))
+                    Image(systemName: mascotSymbol(MascotStateResolver.mascotPressure(usage)?.state ?? .normal))
                         .font(.system(size: 9))
                     Text(provider.displayName.uppercased())
                         .font(.system(size: 10, weight: .medium))
@@ -97,41 +93,48 @@ struct QuotaComplicationView: View {
         .containerBackground(for: .widget) { Color.clear }
     }
 
-    /// Tightest remaining across both windows of the selected provider (§18), and which
-    /// window that is. Unlabelled, a weekly number moves so slowly it reads as frozen.
-    private var circular: some View {
-        let pressure = MascotStateResolver.resolve(claude)
-        return VStack(spacing: 0) {
-            Image(systemName: mascotSymbol(pressure?.state ?? .normal))
-                .font(.system(size: 10))
-            Text(tightest(pressure))
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-            if let kind = pressure?.constrainingWindow {
-                Text(kind.shortLabel)
-                    .font(.system(size: 8, weight: .medium))
-            }
-        }
-        .containerBackground(for: .widget) { Color.clear }
-    }
-
-    private var corner: some View {
-        let pressure = MascotStateResolver.resolve(claude)
-        return Text(tightest(pressure))
-            .font(.system(size: 14, weight: .semibold, design: .rounded))
-            // Curves along the bezel: which provider, and which window the number is.
-            .widgetLabel {
-                Text(pressure?.constrainingWindow.map { "CLAUDE \($0.shortLabel)" } ?? "CLAUDE")
-            }
-            .containerBackground(for: .widget) { Color.clear }
-    }
-
-    /// `C 36% · X 53%` — each provider's tighter window, as on its pet (§18). It used to
-    /// be Claude's 5-hour beside Codex's weekly, two numbers that meant different things.
+    /// `C 36% · X 53%` — each provider's number as its pet reads it (§18).
     private var inline: some View {
-        let c = tightest(MascotStateResolver.resolve(claude))
-        let x = tightest(MascotStateResolver.resolve(codex))
+        let c = percentLeft(MascotStateResolver.mascotPressure(entry.snapshot?.claude))
+        let x = percentLeft(MascotStateResolver.mascotPressure(entry.snapshot?.codex))
         return Text("C \(c) · X \(x)")
             .containerBackground(for: .widget) { Color.clear }
+    }
+}
+
+/// One window of one provider, for a corner or circular slot. Each of the four is its own
+/// entry in the face's complication picker, so every slot says one fixed thing instead of
+/// following whichever window happens to be tighter.
+struct WindowComplicationView: View {
+    @Environment(\.widgetFamily) private var family
+    let provider: AIProvider
+    let window: UsageWindowKind
+    let entry: QuotaEntry
+
+    private var value: String {
+        entry.snapshot?.usage(for: provider)?.window(window)
+            .map { "\(Int($0.remainingPercent.rounded()))%" } ?? "--"
+    }
+
+    var body: some View {
+        switch family {
+        case .accessoryCorner:
+            Text(value)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                // Curves along the bezel.
+                .widgetLabel { Text("\(provider.displayName.uppercased()) \(window.shortLabel)") }
+                .containerBackground(for: .widget) { Color.clear }
+        default:
+            VStack(spacing: 0) {
+                Text(provider.displayName.uppercased())
+                    .font(.system(size: 8, weight: .medium))
+                Text(value)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                Text(window.shortLabel)
+                    .font(.system(size: 8, weight: .medium))
+            }
+            .containerBackground(for: .widget) { Color.clear }
+        }
     }
 }
 
@@ -179,7 +182,7 @@ struct ClaudePetView: View {
 
     var body: some View {
         let usage = entry.snapshot?.claude
-        let pressure = MascotStateResolver.resolve(usage)
+        let pressure = MascotStateResolver.mascotPressure(usage)
         HStack(spacing: 6) {
             // The bandana switch lives in the app's own defaults, out of the widget's reach;
             // on is its default.
@@ -193,7 +196,7 @@ struct ClaudePetView: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(tightest(pressure))
+                    Text(percentLeft(pressure))
                         .font(.system(size: 22, weight: .semibold, design: .rounded))
                     if let kind = pressure?.constrainingWindow {
                         Text(kind.shortLabel)
@@ -224,9 +227,42 @@ struct ClaudePetView: View {
 @main
 struct QuotaPetsWidgetBundle: WidgetBundle {
     var body: some Widget {
+        ClaudeFiveHourWidget()
+        ClaudeWeeklyWidget()
+        CodexFiveHourWidget()
+        CodexWeeklyWidget()
         QuotaPetsWidgets()
         ClaudePetWidget()
     }
+}
+
+@MainActor
+private func windowWidget(_ provider: AIProvider, _ window: UsageWindowKind) -> some WidgetConfiguration {
+    let name = "\(provider.displayName) \(window.shortLabel)"
+    let span = window == .fiveHour ? "5-hour" : "weekly"
+    return StaticConfiguration(kind: "com.quotapets.\(provider.rawValue).\(window.rawValue)",
+                               provider: QuotaProvider()) { entry in
+        WindowComplicationView(provider: provider, window: window, entry: entry)
+    }
+    .configurationDisplayName(name)
+    .description("\(provider.displayName) \(span) quota left.")
+    .supportedFamilies([.accessoryCorner, .accessoryCircular])
+}
+
+struct ClaudeFiveHourWidget: Widget {
+    var body: some WidgetConfiguration { windowWidget(.claude, .fiveHour) }
+}
+
+struct ClaudeWeeklyWidget: Widget {
+    var body: some WidgetConfiguration { windowWidget(.claude, .weekly) }
+}
+
+struct CodexFiveHourWidget: Widget {
+    var body: some WidgetConfiguration { windowWidget(.codex, .fiveHour) }
+}
+
+struct CodexWeeklyWidget: Widget {
+    var body: some WidgetConfiguration { windowWidget(.codex, .weekly) }
 }
 
 struct ClaudePetWidget: Widget {
@@ -235,7 +271,7 @@ struct ClaudePetWidget: Widget {
             ClaudePetView(entry: entry)
         }
         .configurationDisplayName("Claude Pet")
-        .description("Claude at its current energy, with the reset countdown.")
+        .description("Claude at its weekly energy, with the reset countdown.")
         .supportedFamilies([.accessoryRectangular])
     }
 }
@@ -247,6 +283,6 @@ struct QuotaPetsWidgets: Widget {
         }
         .configurationDisplayName("QuotaPets")
         .description("Claude and Codex quota remaining.")
-        .supportedFamilies([.accessoryRectangular, .accessoryCircular, .accessoryCorner, .accessoryInline])
+        .supportedFamilies([.accessoryRectangular, .accessoryInline])
     }
 }

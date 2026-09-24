@@ -234,7 +234,8 @@ last page. Codex is a terminal window whose cursor is the pulse, slowing from 0.
 while its glow fades to nothing.
 
 Pressure comes from the *tighter* window — `min(fiveHour, weekly)` — and the UI marks which
-one, so a tired pet is explainable.
+one, so a tired pet is explainable. Claude's pixel mascot is the exception: its mood reads
+the weekly window alone.
 
 Two Apple constraints shaped this and are worth knowing before changing it:
 
@@ -258,16 +259,18 @@ face" app on the App Store is one of two things: an image or Live Photo on Apple
 face (Facer, the "live" face galleries), or an app that draws a clock and stays in front
 (Clockology). QuotaPets does the second, plus complications:
 
-- **Complications.** *QuotaPets* fits all four families; the circular and corner ones
-  name the window their number is from. *Claude Pet* is rectangular: Claude drawn at its
-  current energy, the tighter window, and a live reset countdown. It needs a face with a
-  rectangular slot — Modular, Modular Duo, Modular Ultra, Infograph Modular — or the
-  Smart Stack.
-- **The live pet** is the app's first page: date, clock, Claude breathing and blinking,
-  and a tap (or Double Tap on Series 9 / Ultra 2) makes it hop — higher the more quota is
-  left. The system's corner clock is hidden there, so it reads as a face, not an app.
-  Settings › General › Return to Clock › QuotaPets › Custom › **After 1 hour** keeps it on
-  your wrist the way a face would; Always-On keeps it visible, dimmed and still.
+- **Complications.** Four for corner and circular slots — *Claude 5H*, *Claude WEEK*,
+  *Codex 5H*, *Codex WEEK* — so each slot holds the one number you picked for it.
+  *QuotaPets* shows both providers in a rectangular or inline slot. *Claude Pet* is
+  rectangular: the pixel Claude at its weekly energy, still, with a live reset countdown.
+  It needs a face with a rectangular slot — Modular, Modular Duo, Modular Ultra,
+  Infograph Modular — or the Smart Stack.
+- **The live pet** is the app's first page: date, clock, the pixel Claude playing its
+  clips, and a tap (or Double Tap on Series 9 / Ultra 2) makes it hop — higher the more
+  weekly quota is left. The system's corner clock is hidden there, so it reads as a face,
+  not an app. Settings › General › Return to Clock › QuotaPets › Custom › **After 1 hour**
+  keeps it on your wrist the way a face would; Always-On keeps it visible, dimmed and
+  still.
 
 ---
 

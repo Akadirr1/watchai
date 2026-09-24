@@ -15,7 +15,7 @@ struct ProviderPageView: View {
     let isAnimating: Bool
     let now: Date
 
-    private var pressure: MascotPressure? { MascotStateResolver.resolve(usage) }
+    private var pressure: MascotPressure? { MascotStateResolver.mascotPressure(usage) }
 
     var body: some View {
         VStack(spacing: 4) {

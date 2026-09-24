@@ -20,7 +20,7 @@ struct FaceView: View {
 
     @State private var hopping = false
 
-    private var pressure: MascotPressure? { MascotStateResolver.resolve(usage) }
+    private var pressure: MascotPressure? { MascotStateResolver.mascotPressure(usage) }
     private var state: MascotEnergyState { pressure?.state ?? .normal }
 
     var body: some View {
@@ -46,7 +46,7 @@ struct FaceView: View {
                         // Whatever the text leaves: the rig keeps headroom for its jumps.
                         .frame(minHeight: 74, maxHeight: .infinity)
                         // A full pet leaps, a spent one barely stirs: the tap reads the
-                        // same energy as the mood.
+                        // same weekly energy as the mood.
                         .offset(y: hopping ? -CGFloat(18 - 3 * state.severity) : 0)
                         .animation(.spring(response: 0.22, dampingFraction: 0.45), value: hopping)
                 }
