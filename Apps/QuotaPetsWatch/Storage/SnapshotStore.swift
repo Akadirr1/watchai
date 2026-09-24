@@ -40,16 +40,16 @@ public final class SnapshotStore: ObservableObject {
         thresholds = decoded.thresholds
     }
 
-    private func persist() {
+    private func persist(reloadingWidgets: Bool) {
         guard let data = try? JSONEncoder().encode(Persisted(snapshot: snapshot, thresholds: thresholds)) else { return }
         // Atomic so a crash mid-write cannot leave a truncated file that fails to decode
         // on next launch — which would silently look like "never synced".
         do { try data.write(to: url, options: .atomic) } catch { return }
         // The complication reads this file but only re-runs when WidgetKit is told to.
-        // Nothing told it, so the face showed whatever it last happened to read. Free
-        // while the app is foregrounded; from a background refresh it spends one of the
-        // widget's ~75 daily reloads, which `BackgroundRefresh.interval` fits.
-        WidgetCenter.shared.reloadAllTimelines()
+        // Nothing told it, so the face showed whatever it last happened to read. Told only
+        // when what it prints changed: from the background every reload spends one of
+        // the widget's ~75 a day, and most fetches change nothing on the face.
+        if reloadingWidgets { WidgetCenter.shared.reloadAllTimelines() }
     }
 
     /// Applies a newly received snapshot, returning any events worth a haptic (§21).
@@ -75,8 +75,9 @@ public final class SnapshotStore: ObservableObject {
             }
         }
         working = incoming.busyProviders(since: snapshot)
+        let redraw = incoming.complicationDigest != snapshot?.complicationDigest
         snapshot = incoming
-        persist()
+        persist(reloadingWidgets: redraw)
         return events
     }
 }

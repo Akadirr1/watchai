@@ -73,6 +73,18 @@ public struct UsageSnapshot: Codable, Sendable, Hashable {
         })
     }
 
+    /// What the complications print: each provider's two windows as whole percentages
+    /// left. Two snapshots with the same digest draw identical complications, so the
+    /// second is not worth one of the widget's ~75 daily reloads. Anything a complication
+    /// starts to show must be added here, or it will go stale on the face.
+    public var complicationDigest: [Int?] {
+        AIProvider.allCases.flatMap { provider in
+            [UsageWindowKind.fiveHour, .weekly].map { kind in
+                usage(for: provider)?.window(kind).map { Int($0.remainingPercent.rounded()) }
+            }
+        }
+    }
+
     /// Replaces one provider's slot, preserving the other. Used when the two providers
     /// are fetched on a stagger (§9) and only one has new data.
     public func replacing(_ usage: ProviderUsage, generatedAt: Date) -> UsageSnapshot {
