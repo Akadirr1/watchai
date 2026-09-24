@@ -66,6 +66,9 @@ final class WatchModel: ObservableObject {
     /// complication — then book the next.
     func backgroundRefresh() async {
         guard client != nil else { return }
+        // Shown on the settings page: the only way to see whether watchOS is granting
+        // wakes at all, which decides how fresh the complications can be.
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: BackgroundRefresh.lastWakeKey)
         await fetch(announcing: false)
         BackgroundRefresh.schedule()
     }
@@ -89,10 +92,10 @@ final class WatchModel: ObservableObject {
     }
 
     /// One timer drives both the clock label and the fetch, so there is no second polling
-    /// loop to duplicate.
+    /// loop to duplicate. Every 30 s while on screen, where widget reloads cost nothing.
     private func startTicking() {
         ticker?.invalidate()
-        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.now = Date()
                 self?.refresh()
@@ -139,15 +142,18 @@ final class WatchModel: ObservableObject {
 ///
 /// The app only fetched while on screen, so between visits the complication had nothing
 /// new to show. A watch app whose complication is on the active face gets up to four
-/// background refreshes an hour; each wake fetches, persists (which reloads the widget)
-/// and books the next. A wake that lands while the app is frontmost is dropped by the
-/// system, and leaving the app books a fresh one, so the chain survives that too.
+/// background refreshes an hour; each wake fetches, persists (which reloads the widget
+/// if its numbers changed) and books the next. A wake that lands while the app is
+/// frontmost is dropped by the system, and leaving the app books a fresh one, so the
+/// chain survives that too. Nothing third-party wakes more often: 30 s in the background
+/// is not on offer, only on screen.
 enum BackgroundRefresh {
     static let identifier = "com.quotapets.watch.refresh"
+    static let lastWakeKey = "lastBackgroundRefresh"
 
-    /// Three wakes an hour: inside the four the system grants, and 72 widget reloads a
-    /// day against a budget of about 75.
-    static let interval: TimeInterval = 20 * 60
+    /// Four wakes an hour, the most watchOS grants. Reloading the widget only when its
+    /// numbers change keeps that inside the ~75 reloads a day it allows.
+    static let interval: TimeInterval = 15 * 60
 
     /// Only one request can be pending and a new one replaces it, so calling this more
     /// often than needed is harmless.
@@ -198,6 +204,7 @@ private struct UsageTabs: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
     @AppStorage("bandana") private var bandana = true
+    @AppStorage(BackgroundRefresh.lastWakeKey) private var lastBackgroundWake: Double = 0
 
     /// Animation stops when the scene is inactive OR the display is dimmed for
     /// Always-On (§16, §20).
@@ -222,8 +229,15 @@ private struct UsageTabs: View {
                     now: model.now
                 )
             }
-            Toggle("Bandana", isOn: $bandana)
-                .padding(.horizontal)
+            VStack(spacing: 10) {
+                Toggle("Bandana", isOn: $bandana)
+                Text(lastBackgroundWake > 0
+                     ? "Background refresh \(Date(timeIntervalSince1970: lastBackgroundWake).formatted(date: .omitted, time: .shortened))"
+                     : "No background refresh yet")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
         }
         .tabViewStyle(.verticalPage)
         .onChange(of: scenePhase, initial: true) { _, phase in

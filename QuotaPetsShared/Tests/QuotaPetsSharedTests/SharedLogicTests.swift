@@ -335,6 +335,35 @@ struct SnapshotTests {
     }
 }
 
+@Suite("Complication digest")
+struct ComplicationDigestTests {
+    private func snapshot(claude5h: Double, at time: TimeInterval) -> UsageSnapshot {
+        UsageSnapshot(
+            claude: ProviderUsage(provider: .claude,
+                                  fiveHour: UsageWindow(usedPercent: claude5h),
+                                  weekly: UsageWindow(usedPercent: 40),
+                                  fetchedAt: now),
+            generatedAt: now.addingTimeInterval(time))
+    }
+
+    @Test("a newer snapshot printing the same numbers needs no reload")
+    func sameNumbersSameDigest() {
+        // 36.2 and 35.9 used both print 64 left; only the timestamp moved.
+        #expect(snapshot(claude5h: 36.2, at: 0).complicationDigest
+                == snapshot(claude5h: 35.9, at: 60).complicationDigest)
+    }
+
+    @Test("a one-point change, or a window appearing, needs one")
+    func changedNumbersChangeDigest() {
+        #expect(snapshot(claude5h: 36, at: 0).complicationDigest
+                != snapshot(claude5h: 37, at: 60).complicationDigest)
+        let codexArrives = snapshot(claude5h: 36, at: 60)
+            .replacing(ProviderUsage(provider: .codex, weekly: UsageWindow(usedPercent: 10), fetchedAt: now),
+                       generatedAt: now.addingTimeInterval(90))
+        #expect(snapshot(claude5h: 36, at: 0).complicationDigest != codexArrives.complicationDigest)
+    }
+}
+
 // MARK: - Timestamp decoding
 
 /// The bug that made a healthy server look broken.

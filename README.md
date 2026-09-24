@@ -240,10 +240,11 @@ the weekly window alone.
 Two Apple constraints shaped this and are worth knowing before changing it:
 
 - **Complications get 75 timeline reloads a day**, about one per 19 minutes, and only
-  redraw when told to. The app reloads them on every new snapshot, and while it is closed
-  it wakes itself every 20 minutes (background app refresh) to fetch one — three wakes an
-  hour, 72 reloads a day. The timeline carries a single entry; the countdown stays alive
-  through `Text(timerInterval:)`, which advances with no code running and no budget spent.
+  redraw when told to. On screen the app fetches every 30 s, where reloads are free. Closed,
+  it wakes itself every 15 minutes (background app refresh), the most watchOS grants, and
+  reloads the complications only when a number on them changed, which keeps four wakes an
+  hour inside the daily budget. Nothing third-party refreshes more often in the background.
+  The settings page shows when the last background refresh ran.
 - **A WidgetKit complication is a one-way door.** Once shipped, the system permanently
   stops calling ClockKit timeline APIs.
 
