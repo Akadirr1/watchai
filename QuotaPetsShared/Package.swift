@@ -7,6 +7,11 @@ import PackageDescription
 // docs/provider-research.md are actually caught.
 let package = Package(
     name: "QuotaPetsShared",
+    // The same floor as the watch targets. Without it the package builds at SwiftPM's
+    // default watchOS deployment target, which need not get the arm64 slice that
+    // Series 9 and later run on watchOS 26 — "Could not find module 'QuotaPetsShared'
+    // for target 'arm64-apple-watchos'". Ignored on Linux.
+    platforms: [.watchOS(.v11)],
     products: [
         .library(name: "QuotaPetsShared", targets: ["QuotaPetsShared"])
     ],

@@ -221,6 +221,10 @@ brew install xcodegen && xcodegen generate && open QuotaPets.xcodeproj
 `QUOTAPETS_API_URL` only; the token arrives by QR pairing, so no credential is ever
 compiled into the bundle and rotating `AUTH_TOKEN` never means rebuilding the app.
 
+Run `xcodegen generate` again after every pull that adds a file or touches `project.yml`.
+A stale project does not warn; it fails with names it cannot find, such as
+`Cannot find 'ClaudeSparkPet' in scope`.
+
 **Mascots are drawn in code**, not shipped as images — Claude is a radiating spark whose
 arms are the gauge, Codex a terminal window whose cursor is the pulse. In both cases the
 form *is* the expression mechanism, so nothing is bolted on to show mood. As quota drains,
