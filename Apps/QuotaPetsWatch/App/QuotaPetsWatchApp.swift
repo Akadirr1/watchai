@@ -1,6 +1,7 @@
 import Combine
 import SwiftUI
 import WatchKit
+import WidgetKit
 import QuotaPetsShared
 
 @main
@@ -68,6 +69,9 @@ final class WatchModel: ObservableObject {
 
     private func becameActive() {
         guard client != nil else { return }
+        // Free while the app is in front (WidgetKit does not count those reloads), so
+        // every visit puts the face back in step, whatever the widget last recorded.
+        WidgetCenter.shared.reloadAllTimelines()
         // Cached data is already on screen; ask for fresh in the background.
         refresh()
         startTicking()
@@ -85,8 +89,8 @@ final class WatchModel: ObservableObject {
         ticker = nil
     }
 
-    /// The `.appRefresh` wake: one fetch — which persists and so reloads the
-    /// complication — then book the next.
+    /// The `.appRefresh` wake: one fetch — which reloads the complication if it is
+    /// behind — then book the next.
     func backgroundRefresh() async {
         guard client != nil else { return }
         // Shown on the settings page: the only way to see whether watchOS is granting
@@ -214,7 +218,7 @@ final class KeepAlive: NSObject, WKExtendedRuntimeSessionDelegate {
 /// The app only fetched while on screen, so between visits the complication had nothing
 /// new to show. A watch app whose complication is on the active face gets up to four
 /// background refreshes an hour; each wake fetches, persists (which reloads the widget
-/// if its numbers changed) and books the next. A wake that lands while the app is
+/// if it is behind) and books the next. A wake that lands while the app is
 /// frontmost is dropped by the system, and leaving the app books a fresh one, so the
 /// chain survives that too. Nothing third-party wakes more often: 30 s in the background
 /// is not on offer, only on screen.
@@ -222,8 +226,8 @@ enum BackgroundRefresh {
     static let identifier = "com.quotapets.watch.refresh"
     static let lastWakeKey = "lastBackgroundRefresh"
 
-    /// Four wakes an hour, the most watchOS grants. Reloading the widget only when its
-    /// numbers change keeps that inside the ~75 reloads a day it allows.
+    /// Four wakes an hour, the most watchOS grants. Reloading the widget only while it
+    /// is behind keeps that inside the ~75 reloads a day it allows.
     static let interval: TimeInterval = 15 * 60
 
     /// Only one request can be pending and a new one replaces it, so calling this more
