@@ -116,33 +116,31 @@ struct WindowComplicationView: View {
             .map { "\(Int($0.remainingPercent.rounded()))" } ?? "--"
     }
 
-    /// Digits large and the percent sign small, so the number gets the room. A "100"
-    /// that would not fit shrinks instead of being cut off.
-    private var percent: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 0) {
-            Text(number)
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
-            if number != "--" {
-                Text("%")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-            }
-        }
-        .lineLimit(1)
-        .minimumScaleFactor(0.6)
+    /// Bold digits with a small percent sign, set as one Text so the two scale together:
+    /// the number grows to whatever the slot allows, and a "100" shrinks instead of being
+    /// cut off. Interpolated rather than joined with `+`, which watchOS 26 deprecates.
+    private func percent(size: CGFloat) -> some View {
+        let digits = Text(verbatim: number)
+            .font(.system(size: size, weight: .bold, design: .rounded))
+        let sign = Text(verbatim: number == "--" ? "" : "%")
+            .font(.system(size: size * 0.4, weight: .bold, design: .rounded))
+        return Text("\(digits)\(sign)")
+            .lineLimit(1)
+            .minimumScaleFactor(0.4)
     }
 
     var body: some View {
         switch family {
         case .accessoryCorner:
-            percent
+            percent(size: 28)
                 // Curves along the bezel.
                 .widgetLabel { Text("\(provider.displayName.uppercased()) \(window.shortLabel)") }
                 .containerBackground(for: .widget) { Color.clear }
         default:
-            VStack(spacing: -1) {
+            VStack(spacing: -2) {
                 Text(provider.displayName.uppercased())
                     .font(.system(size: 7, weight: .medium))
-                percent
+                percent(size: 24)
                 Text(window.shortLabel)
                     .font(.system(size: 7, weight: .medium))
             }
