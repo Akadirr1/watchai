@@ -111,27 +111,40 @@ struct WindowComplicationView: View {
     let window: UsageWindowKind
     let entry: QuotaEntry
 
-    private var value: String {
+    private var number: String {
         entry.snapshot?.usage(for: provider)?.window(window)
-            .map { "\(Int($0.remainingPercent.rounded()))%" } ?? "--"
+            .map { "\(Int($0.remainingPercent.rounded()))" } ?? "--"
+    }
+
+    /// Digits large and the percent sign small, so the number gets the room. A "100"
+    /// that would not fit shrinks instead of being cut off.
+    private var percent: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            Text(number)
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
+            if number != "--" {
+                Text("%")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+            }
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
     }
 
     var body: some View {
         switch family {
         case .accessoryCorner:
-            Text(value)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
+            percent
                 // Curves along the bezel.
                 .widgetLabel { Text("\(provider.displayName.uppercased()) \(window.shortLabel)") }
                 .containerBackground(for: .widget) { Color.clear }
         default:
-            VStack(spacing: 0) {
+            VStack(spacing: -1) {
                 Text(provider.displayName.uppercased())
-                    .font(.system(size: 8, weight: .medium))
-                Text(value)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .font(.system(size: 7, weight: .medium))
+                percent
                 Text(window.shortLabel)
-                    .font(.system(size: 8, weight: .medium))
+                    .font(.system(size: 7, weight: .medium))
             }
             .containerBackground(for: .widget) { Color.clear }
         }
