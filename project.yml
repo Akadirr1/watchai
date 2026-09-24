@@ -68,6 +68,9 @@ targets:
       properties:
         CFBundleDisplayName: QuotaPets
         WKApplication: true
+        # There is no iPhone app. Without this the watch refuses to install the build,
+        # asking for a WKCompanionAppBundleIdentifier that has nothing to name.
+        WKWatchOnly: true
         # Always-On is wanted: the mascot and countdown are designed to stay legible
         # while dimmed.
         WKSupportsAlwaysOnDisplay: true
