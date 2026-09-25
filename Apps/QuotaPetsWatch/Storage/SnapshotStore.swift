@@ -40,16 +40,22 @@ public final class SnapshotStore: ObservableObject {
         thresholds = decoded.thresholds
     }
 
-    private func persist(reloadingWidgets: Bool) {
+    private func persist() {
         guard let data = try? JSONEncoder().encode(Persisted(snapshot: snapshot, thresholds: thresholds)) else { return }
         // Atomic so a crash mid-write cannot leave a truncated file that fails to decode
         // on next launch — which would silently look like "never synced".
-        do { try data.write(to: url, options: .atomic) } catch { return }
-        // The complication reads this file but only re-runs when WidgetKit is told to.
-        // Nothing told it, so the face showed whatever it last happened to read. Told only
-        // when what it prints changed: from the background every reload spends one of
-        // the widget's ~75 a day, and most fetches change nothing on the face.
-        if reloadingWidgets { WidgetCenter.shared.reloadAllTimelines() }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    /// The complication reads the snapshot file but only re-runs when WidgetKit is told to.
+    /// Told whenever its numbers differ from the ones the widget last read — not from the
+    /// previous snapshot: WidgetKit silently drops background reloads past its daily
+    /// budget, and one dropped that way was never asked for again once the numbers
+    /// stopped moving, which left the face at 99 while the app said 97. Numbers that
+    /// did not change cost nothing, so this stays inside that budget.
+    private func redrawWidgetsIfBehind() {
+        guard let snapshot, snapshot.complicationDigest != SharedContainer.lastRendered() else { return }
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     /// Applies a newly received snapshot, returning any events worth a haptic (§21).
@@ -57,6 +63,9 @@ public final class SnapshotStore: ObservableObject {
     /// Out-of-order delivery is real: `transferUserInfo` is FIFO but background transfers
     /// can arrive after a newer `updateApplicationContext`. An older snapshot is dropped.
     public func apply(_ incoming: UsageSnapshot) -> [QuotaEvent] {
+        // Every fetch retries a reload that has not landed, even one that brings
+        // nothing newer.
+        defer { redrawWidgetsIfBehind() }
         if let current = snapshot, incoming.generatedAt <= current.generatedAt {
             return []
         }
@@ -75,9 +84,8 @@ public final class SnapshotStore: ObservableObject {
             }
         }
         working = incoming.busyProviders(since: snapshot)
-        let redraw = incoming.complicationDigest != snapshot?.complicationDigest
         snapshot = incoming
-        persist(reloadingWidgets: redraw)
+        persist()
         return events
     }
 }

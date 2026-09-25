@@ -19,7 +19,8 @@ struct QuotaEntry: TimelineEntry {
 ///
 /// The budget is the binding constraint: watchOS allows **75 reloads per day**, about
 /// one per 19 minutes at best. The numbers only change when the app writes a new
-/// snapshot, and the app reloads this timeline when it does (`SnapshotStore.persist`).
+/// snapshot, and the app reloads this timeline until it has read them
+/// (`SnapshotStore.redrawWidgetsIfBehind`).
 /// So the timeline never schedules a reload of its own: a timed policy would spend that
 /// same budget re-reading a file nothing has rewritten.
 ///
@@ -36,8 +37,10 @@ struct QuotaProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<QuotaEntry>) -> Void) {
-        let entry = QuotaEntry(date: Date(), snapshot: loadSharedSnapshot())
-        completion(Timeline(entries: [entry], policy: .never))
+        let snapshot = loadSharedSnapshot()
+        // Tells the app this reload happened (`SnapshotStore.redrawWidgetsIfBehind`).
+        if let snapshot { SharedContainer.recordRendered(snapshot.complicationDigest) }
+        completion(Timeline(entries: [QuotaEntry(date: Date(), snapshot: snapshot)], policy: .never))
     }
 }
 

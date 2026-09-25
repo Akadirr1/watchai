@@ -30,4 +30,21 @@ public enum SharedContainer {
     public static func snapshotURL() -> URL {
         directory().appendingPathComponent(snapshotFilename)
     }
+
+    /// What the complications last read, as a `UsageSnapshot.complicationDigest`. The
+    /// widget writes it on every timeline it builds; the app reads it back to learn
+    /// whether a reload it asked for really ran, since WidgetKit drops the ones past its
+    /// daily budget without a word.
+    public static func recordRendered(_ digest: [Int?]) {
+        try? JSONEncoder().encode(digest).write(to: renderedURL(), options: .atomic)
+    }
+
+    public static func lastRendered() -> [Int?]? {
+        guard let data = try? Data(contentsOf: renderedURL()) else { return nil }
+        return try? JSONDecoder().decode([Int?].self, from: data)
+    }
+
+    private static func renderedURL() -> URL {
+        directory().appendingPathComponent("rendered.json")
+    }
 }

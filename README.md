@@ -242,12 +242,15 @@ Two Apple constraints shaped this and are worth knowing before changing it:
 - **Complications get 75 timeline reloads a day**, about one per 19 minutes, and only
   redraw when told to. On screen the app fetches every 30 s, where reloads are free. Closed,
   it wakes itself every 15 minutes (background app refresh), the most watchOS grants, and
-  reloads the complications only when a number on them changed, which keeps four wakes an
-  hour inside the daily budget. On top of that, every visit to the app starts an extended
-  runtime session (type *physical therapy*, `WKBackgroundModes`), which keeps the 30 s poll
-  going for up to an hour with the wrist down. That is a personal-build choice: Apple asks
-  that the session type match the app's purpose, so it would not pass App Review. The
-  settings page shows when the last background refresh ran.
+  reloads the complications only while they are behind, which keeps four wakes an hour
+  inside the daily budget. "Behind" is checked against what the widget last read, not
+  against the previous fetch: WidgetKit silently drops reloads past the budget, and each
+  poll asks again until one lands. Opening the app always reloads them too (free in the
+  foreground), so a visit puts the face back in step. On top of that, every visit to the
+  app starts an extended runtime session (type *physical therapy*, `WKBackgroundModes`),
+  which keeps the 30 s poll going for up to an hour with the wrist down. That is a
+  personal-build choice: Apple asks that the session type match the app's purpose, so it
+  would not pass App Review. The settings page shows when the last background refresh ran.
 - **A WidgetKit complication is a one-way door.** Once shipped, the system permanently
   stops calling ClockKit timeline APIs.
 
